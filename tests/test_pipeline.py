@@ -1,7 +1,9 @@
 import json
+import tempfile
 import unittest
 from pathlib import Path
 
+from book_to_video.datalab_extractor import normalize_datalab_convert_result
 from book_to_video.pipeline import build_planning_artifacts
 
 
@@ -41,12 +43,31 @@ class PipelineTest(unittest.TestCase):
             15,
         )
 
+    def test_datalab_result_normalizes_to_chapter_extraction(self) -> None:
+        datalab_result = _load_json("examples/datalab_convert.sample.json")
+        with tempfile.TemporaryDirectory() as tmp:
+            chapter = normalize_datalab_convert_result(
+                datalab_result=datalab_result,
+                source_pdf="light-and-shadows.pdf",
+                output_dir=Path(tmp),
+            )
+
+            self.assertEqual(chapter["provider"], "datalab")
+            self.assertEqual(chapter["title"], "Light and Shadows")
+            self.assertEqual(len(chapter["pages"]), 2)
+            self.assertEqual(len(chapter["topics"]), 2)
+            self.assertEqual(chapter["topics"][0]["illustrations"][0]["illustration_id"], "illustration_001")
+            self.assertTrue(Path(chapter["topics"][0]["illustrations"][0]["path"]).exists())
+
 
 def _load_sample() -> dict:
-    with (ROOT / "examples" / "chapter_extraction.sample.json").open("r", encoding="utf-8") as file:
+    return _load_json("examples/chapter_extraction.sample.json")
+
+
+def _load_json(relative_path: str) -> dict:
+    with (ROOT / relative_path).open("r", encoding="utf-8") as file:
         return json.load(file)
 
 
 if __name__ == "__main__":
     unittest.main()
-
