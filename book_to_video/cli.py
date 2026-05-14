@@ -8,6 +8,8 @@ from .datalab_client import DatalabConvertClient, DatalabConvertOptions
 from .datalab_extractor import normalize_datalab_convert_result
 from .io_utils import read_json, write_json
 from .pipeline import build_planning_artifacts
+from .placeholders import create_placeholder_clips
+from .stitcher import stitch_from_manifest
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -55,6 +57,48 @@ def build_parser() -> argparse.ArgumentParser:
     extract.add_argument("--poll-interval", type=int, default=2)
     extract.add_argument("--max-polls", type=int, default=300)
     extract.add_argument("--skip-cache", action="store_true")
+
+    stitch = subparsers.add_parser(
+        "stitch",
+        help="Stitch generated 8-second clips into episode videos and an optional chapter video.",
+    )
+    stitch.add_argument("--stitch-manifest", required=True, help="Path to stitch_manifest.json.")
+    stitch.add_argument(
+        "--media-root",
+        help="Root directory for relative clip paths. Defaults to the manifest directory.",
+    )
+    stitch.add_argument(
+        "--output-dir",
+        help="Root directory for relative output paths. Defaults to the manifest directory.",
+    )
+    stitch.add_argument("--dry-run", action="store_true", help="Report planned stitching without running ffmpeg.")
+    stitch.add_argument(
+        "--episodes-only",
+        action="store_true",
+        help="Only stitch episode videos; skip the full chapter playlist video.",
+    )
+    stitch.add_argument(
+        "--copy-codecs",
+        action="store_true",
+        help="Use ffmpeg stream copy instead of re-encoding. Faster but less tolerant.",
+    )
+
+    placeholders = subparsers.add_parser(
+        "mock-clips",
+        help="Create local placeholder MP4 clips from veo_manifest.json for end-to-end stitching tests.",
+    )
+    placeholders.add_argument("--veo-manifest", required=True, help="Path to veo_manifest.json.")
+    placeholders.add_argument(
+        "--media-root",
+        help="Root directory for relative clip output paths. Defaults to the manifest directory.",
+    )
+    placeholders.add_argument("--limit", type=int, default=None, help="Only create the first N clips.")
+    placeholders.add_argument(
+        "--duration",
+        type=float,
+        default=None,
+        help="Override clip duration for faster local tests.",
+    )
     return parser
 
 
@@ -120,6 +164,35 @@ def main() -> None:
         )
         write_json(output_dir / "chapter_extraction.json", chapter)
         print(f"Wrote Datalab chapter extraction to {output_dir / 'chapter_extraction.json'}")
+    elif args.command == "stitch":
+        manifest_path = Path(args.stitch_manifest)
+        stitch_manifest = read_json(manifest_path)
+        media_root = Path(args.media_root) if args.media_root else manifest_path.parent
+        output_dir = Path(args.output_dir) if args.output_dir else manifest_path.parent
+
+        result = stitch_from_manifest(
+            stitch_manifest=stitch_manifest,
+            media_root=media_root,
+            output_root=output_dir,
+            dry_run=args.dry_run,
+            include_chapter=not args.episodes_only,
+            copy_codecs=args.copy_codecs,
+        )
+        write_json(output_dir / "stitch_result.json", result)
+        action = "Planned" if args.dry_run else "Completed"
+        print(f"{action} stitching; wrote {output_dir / 'stitch_result.json'}")
+    elif args.command == "mock-clips":
+        manifest_path = Path(args.veo_manifest)
+        veo_manifest = read_json(manifest_path)
+        media_root = Path(args.media_root) if args.media_root else manifest_path.parent
+        result = create_placeholder_clips(
+            veo_manifest=veo_manifest,
+            media_root=media_root,
+            limit=args.limit,
+            duration_override=args.duration,
+        )
+        write_json(media_root / "mock_clips_result.json", result)
+        print(f"Created {result['created_clip_count']} placeholder clips under {media_root}")
 
 
 if __name__ == "__main__":
