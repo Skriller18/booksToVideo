@@ -1,0 +1,67 @@
+{
+  "chapter_id": "chapter_earth_neighbours",
+  "title": "The Earth and Its Neighbours",
+  "source_pdf": "sample_chapter.pdf",
+  "pages": [
+    {
+      "page_number": 1,
+      "text": "We see the Sun, Moon, stars and planets in the sky. These heavenly bodies are part of our neighbourhood in space."
+    },
+    {
+      "page_number": 2,
+      "text": "The Sun gives us heat and light. The Earth moves around the Sun."
+    },
+    {
+      "page_number": 3,
+      "text": "The Moon is Earth's natural satellite. It changes shape as seen from Earth."
+    }
+  ],
+  "topics": [
+    {
+      "topic_id": "topic_01",
+      "title": "Our Sky Neighbourhood",
+      "source_pages": [1],
+      "text": "We see the Sun, Moon, stars and planets in the sky. These heavenly bodies are part of our neighbourhood in space.",
+      "learning_goal": "Students understand that the sky contains different heavenly bodies.",
+      "illustrations": [
+        {
+          "illustration_id": "fig_001_sky",
+          "path": "assets/fig_001_sky.png",
+          "caption": "Children looking at the Sun, Moon, stars and planets in the sky.",
+          "page_number": 1
+        }
+      ]
+    },
+    {
+      "topic_id": "topic_02",
+      "title": "The Sun",
+      "source_pages": [2],
+      "text": "The Sun gives us heat and light. The Earth moves around the Sun.",
+      "learning_goal": "Students understand that the Sun gives heat and light and Earth moves around it.",
+      "illustrations": [
+        {
+          "illustration_id": "fig_002_sun",
+          "path": "assets/fig_002_sun.png",
+          "caption": "The Sun shining on Earth.",
+          "page_number": 2
+        }
+      ]
+    },
+    {
+      "topic_id": "topic_03",
+      "title": "The Moon",
+      "source_pages": [3],
+      "text": "The Moon is Earth's natural satellite. It changes shape as seen from Earth.",
+      "learning_goal": "Students understand that the Moon is Earth's natural satellite and appears to change shape.",
+      "illustrations": [
+        {
+          "illustration_id": "fig_003_moon",
+          "path": "assets/fig_003_moon.png",
+          "caption": "Different shapes of the Moon seen from Earth.",
+          "page_number": 3
+        }
+      ]
+    }
+  ]
+}
+
