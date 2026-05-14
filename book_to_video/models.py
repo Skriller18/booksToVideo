@@ -45,6 +45,8 @@ class ClipBeat:
     source_pages: list[int]
     reference_illustrations: list[IllustrationRef]
     narration: str
+    voice_profile: str
+    audio_direction: str
     visual_beat: str
     veo_prompt: str
     negative_prompt: str
@@ -59,4 +61,3 @@ class StitchEpisode:
     output_video: str
     clip_paths: list[str]
     duration_seconds: int
-

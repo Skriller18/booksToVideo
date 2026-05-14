@@ -59,6 +59,12 @@ def build_veo_manifest(clips: list[ClipBeat]) -> dict[str, Any]:
                 "duration_seconds": clip.duration_seconds,
                 "prompt": build_veo_prompt(clip),
                 "negative_prompt": clip.negative_prompt,
+                "audio": {
+                    "mode": "native",
+                    "spoken_line": clip.narration,
+                    "voice_profile": clip.voice_profile,
+                    "audio_direction": clip.audio_direction,
+                },
                 "reference_images": [item.path for item in clip.reference_illustrations],
                 "output_path": f"clips/clip_{clip.global_clip_index:04d}.mp4",
                 "status": "pending",
@@ -90,4 +96,3 @@ def build_stitch_manifest(episodes: list[Episode], clips: list[ClipBeat]) -> dic
             "episode_paths": [episode.output_video for episode in stitch_episodes],
         },
     }
-
