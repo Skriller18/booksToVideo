@@ -13,6 +13,19 @@ NEGATIVE_PROMPT = (
     "no scary visuals, no over-realistic style, no visual clutter"
 )
 
+VOICE_PROFILE = (
+    "same warm Indian English teacher voice across all clips, friendly desi classroom tone, "
+    "natural Indian accent, clear pronunciation for school students, expressive but not exaggerated"
+)
+
+
+def build_audio_direction(spoken_line: str) -> str:
+    return (
+        f"Native audio: spoken line exactly: \"{spoken_line}\" "
+        f"Voice profile: {VOICE_PROFILE}. "
+        "Keep background ambience light and classroom-friendly, with no overpowering music or sound effects."
+    )
+
 
 def build_veo_prompt(clip: ClipBeat) -> str:
     reference_note = "based closely on the provided textbook illustration"
@@ -25,6 +38,5 @@ def build_veo_prompt(clip: ClipBeat) -> str:
         f"Context: {clip.narration} "
         f"Style and ambience: {SERIES_STYLE}. "
         "Camera: slow gentle push-in or pan, stable composition, one focused visual action. "
-        "Audio direction: leave room for separate warm Indian English teacher narration."
+        f"{clip.audio_direction}"
     )
-

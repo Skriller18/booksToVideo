@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from .models import ClipBeat, Episode
-from .prompts import NEGATIVE_PROMPT, build_veo_prompt
+from .prompts import NEGATIVE_PROMPT, VOICE_PROFILE, build_audio_direction, build_veo_prompt
 
 
 ARC_TEMPLATES = [
@@ -48,6 +48,8 @@ def build_clip_beats(
                 source_pages=episode.source_pages,
                 reference_illustrations=episode.illustrations[:3],
                 narration=narration,
+                voice_profile=VOICE_PROFILE,
+                audio_direction=build_audio_direction(narration),
                 visual_beat=visual_beat,
                 veo_prompt="",
                 negative_prompt=NEGATIVE_PROMPT,
@@ -102,4 +104,3 @@ def _shorten(text: str, max_length: int) -> str:
     if len(normalized) <= max_length:
         return normalized
     return normalized[: max_length - 3].rstrip() + "..."
-
