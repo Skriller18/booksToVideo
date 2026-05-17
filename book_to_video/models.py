@@ -20,6 +20,10 @@ class IllustrationRef:
     path: str
     caption: str = ""
     page_number: int | None = None
+    source_filename: str = ""
+    asset_type: str = "candidate_lesson_illustration"
+    is_lesson_asset: bool = True
+    rejection_reason: str = ""
 
 
 @dataclass(frozen=True)

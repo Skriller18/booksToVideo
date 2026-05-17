@@ -52,6 +52,13 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--episode-count", type=int, default=None)
     run.add_argument("--clips-per-episode", type=int, default=15)
     run.add_argument("--clip-duration", type=int, default=8, choices=(4, 6, 8))
+    run.add_argument(
+        "--orchestrator",
+        default="auto",
+        choices=("auto", "local", "gemini"),
+        help="Script orchestrator for episode flow. auto uses Gemini when an API key is available.",
+    )
+    run.add_argument("--orchestrator-model", default="gemini-2.5-flash")
     run.add_argument("--veo-model", default=DEFAULT_VEO_MODEL, help=f"Veo model id. Default: {DEFAULT_VEO_MODEL}.")
     run.add_argument("--veo-limit", type=int, default=None, help="Generate only the first N runnable clips.")
     run.add_argument(
@@ -95,6 +102,13 @@ def build_parser() -> argparse.ArgumentParser:
         choices=(4, 6, 8),
         help="Clip duration in seconds. Default: 8.",
     )
+    plan.add_argument(
+        "--orchestrator",
+        default="auto",
+        choices=("auto", "local", "gemini"),
+        help="Script orchestrator for episode flow. auto uses Gemini when an API key is available.",
+    )
+    plan.add_argument("--orchestrator-model", default="gemini-2.5-flash")
 
     extract = subparsers.add_parser(
         "extract-datalab",
@@ -278,6 +292,8 @@ def main() -> None:
             target_episode_count=args.episode_count,
             clips_per_episode=args.clips_per_episode,
             clip_duration_seconds=args.clip_duration,
+            orchestrator=args.orchestrator,
+            orchestrator_model=args.orchestrator_model,
         )
         write_json(output_dir / "episode_plan.json", artifacts["episode_plan"])
         write_json(output_dir / "storyboard.json", artifacts["storyboard"])
@@ -400,6 +416,8 @@ def main() -> None:
             target_episode_count=args.episode_count,
             clips_per_episode=args.clips_per_episode,
             clip_duration_seconds=args.clip_duration,
+            orchestrator=args.orchestrator,
+            orchestrator_model=args.orchestrator_model,
         )
 
         output_dir.mkdir(parents=True, exist_ok=True)

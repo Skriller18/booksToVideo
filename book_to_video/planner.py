@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from .asset_policy import is_lesson_asset
 from .models import Episode, IllustrationRef
 
 
@@ -20,7 +21,11 @@ def build_episode_plan(
     episodes: list[Episode] = []
 
     for index, topic in enumerate(episode_units, start=1):
-        illustrations = [_build_illustration_ref(item) for item in topic.get("illustrations", [])]
+        illustrations = [
+            _build_illustration_ref(item)
+            for item in topic.get("illustrations", [])
+            if is_lesson_asset(item)
+        ]
         source_pages = sorted(set(topic.get("source_pages", [])))
         source_topic_id = topic.get("topic_id", f"topic_{index:02d}")
         episodes.append(
@@ -34,12 +39,12 @@ def build_episode_plan(
                 source_topic_ids=[source_topic_id],
                 illustrations=illustrations,
                 micro_drama_arc=[
-                    "Curiosity hook",
-                    "Introduce the core question",
-                    "Bring the textbook illustration to life",
-                    "Show the concept through action",
-                    "Recap the idea",
-                    "Bridge to the next topic",
+                    "Open on a relatable classroom problem",
+                    "Let the learners ask the core question",
+                    "Reveal only the illustration that clarifies the idea",
+                    "Teach through connected action, not numbered steps",
+                    "Correct one likely misunderstanding",
+                    "End with a story beat that bridges forward",
                 ],
             )
         )
@@ -96,6 +101,10 @@ def _build_illustration_ref(raw: dict[str, Any]) -> IllustrationRef:
         path=raw.get("path", ""),
         caption=raw.get("caption", ""),
         page_number=raw.get("page_number"),
+        source_filename=raw.get("source_filename", ""),
+        asset_type=raw.get("asset_type", "candidate_lesson_illustration"),
+        is_lesson_asset=bool(raw.get("is_lesson_asset", True)),
+        rejection_reason=raw.get("rejection_reason", ""),
     )
 
 

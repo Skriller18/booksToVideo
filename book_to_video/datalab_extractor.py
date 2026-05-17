@@ -5,6 +5,8 @@ import re
 from pathlib import Path
 from typing import Any, Iterable
 
+from .asset_policy import asset_policy_metadata, is_lesson_asset
+
 
 TEXT_KEYS = ("text", "html", "markdown", "content")
 CHILD_KEYS = ("children", "blocks", "items", "elements")
@@ -118,14 +120,16 @@ def _save_images(datalab_result: dict[str, Any], assets_dir: Path) -> list[dict[
         safe_name = f"illustration_{index:03d}{suffix}"
         output_path = assets_dir / safe_name
         output_path.write_bytes(_decode_base64_image(encoded))
+        image = {
+            "illustration_id": f"illustration_{index:03d}",
+            "path": str(output_path),
+            "caption": _caption_from_filename(filename),
+            "page_number": _page_number_from_filename(filename),
+            "source_filename": filename,
+        }
+        image.update(asset_policy_metadata(image))
         extracted.append(
-            {
-                "illustration_id": f"illustration_{index:03d}",
-                "path": str(output_path),
-                "caption": _caption_from_filename(filename),
-                "page_number": _page_number_from_filename(filename),
-                "source_filename": filename,
-            }
+            image
         )
     return extracted
 
@@ -144,6 +148,7 @@ def _build_page_topics(
             image
             for image in extracted_images
             if image.get("page_number") in (None, page_number)
+            and is_lesson_asset(image)
         ]
         title = page.get("title") or f"Page {page_number}"
         topics.append(

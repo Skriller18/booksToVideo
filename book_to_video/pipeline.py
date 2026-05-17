@@ -13,6 +13,8 @@ def build_planning_artifacts(
     target_episode_count: int | None,
     clips_per_episode: int,
     clip_duration_seconds: int,
+    orchestrator: str = "local",
+    orchestrator_model: str = "gemini-2.5-flash",
 ) -> dict[str, Any]:
     episodes = build_episode_plan(
         chapter=chapter,
@@ -24,6 +26,8 @@ def build_planning_artifacts(
         chapter=chapter,
         episodes=episodes,
         clip_duration_seconds=clip_duration_seconds,
+        orchestrator=orchestrator,
+        orchestrator_model=orchestrator_model,
     )
     veo_manifest = build_veo_manifest(clips)
     stitch_manifest = build_stitch_manifest(episodes, clips)
