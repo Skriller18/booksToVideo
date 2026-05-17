@@ -11,6 +11,7 @@ from urllib import error, request
 
 
 DEFAULT_DATALAB_BASE_URL = "https://www.datalab.to/api/v1"
+DATALAB_USER_AGENT = "books-to-video/0.1 datalab-rest-client"
 
 
 @dataclass(frozen=True)
@@ -88,7 +89,9 @@ class DatalabConvertClient:
             data=body,
             method="POST",
             headers={
-                "X-API-Key": self.api_key,
+                "X-Api-Key": self.api_key,
+                "User-Agent": DATALAB_USER_AGENT,
+                "Accept": "application/json",
                 "Content-Type": content_type,
             },
         )
@@ -100,7 +103,15 @@ class DatalabConvertClient:
         poll_interval_seconds: int,
         max_polls: int,
     ) -> dict[str, Any]:
-        req = request.Request(check_url, method="GET", headers={"X-API-Key": self.api_key})
+        req = request.Request(
+            check_url,
+            method="GET",
+            headers={
+                "X-Api-Key": self.api_key,
+                "User-Agent": DATALAB_USER_AGENT,
+                "Accept": "application/json",
+            },
+        )
         last_result: dict[str, Any] = {}
         for _ in range(max_polls):
             last_result = _read_json_response(req, timeout=self.timeout_seconds)
@@ -170,4 +181,3 @@ def _read_json_response(req: request.Request, timeout: int) -> dict[str, Any]:
 
 def _bool(value: bool) -> str:
     return "true" if value else "false"
-
