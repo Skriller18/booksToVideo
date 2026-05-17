@@ -68,6 +68,60 @@ class PipelineTest(unittest.TestCase):
             self.assertEqual(chapter["topics"][0]["illustrations"][0]["illustration_id"], "illustration_001")
             self.assertTrue(Path(chapter["topics"][0]["illustrations"][0]["path"]).exists())
 
+    def test_datalab_json_children_normalizes_without_markdown(self) -> None:
+        datalab_result = {
+            "status": "complete",
+            "success": True,
+            "output_format": "json",
+            "markdown": None,
+            "json": {
+                "children": [
+                    {
+                        "id": "/page/0/Page/0",
+                        "block_type": "Page",
+                        "html": "<h1>Duplicated aggregate text</h1>",
+                        "children": [
+                            {
+                                "id": "/page/0/SectionHeader/0",
+                                "block_type": "SectionHeader",
+                                "html": "<h1>The Boy Who Broke the Bank</h1>",
+                            },
+                            {
+                                "id": "/page/0/Text/1",
+                                "block_type": "Text",
+                                "html": "<p>Nathu swept the steps of the bank.</p>",
+                            },
+                        ],
+                    },
+                    {
+                        "id": "/page/1/Page/1",
+                        "block_type": "Page",
+                        "children": [
+                            {
+                                "id": "/page/1/Text/0",
+                                "block_type": "Text",
+                                "page": 1,
+                                "html": "<p>The rumour spread through the bazaar.</p>",
+                            }
+                        ],
+                    },
+                ],
+                "metadata": {"page_stats": [{"page_id": 0}, {"page_id": 1}]},
+            },
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            chapter = normalize_datalab_convert_result(
+                datalab_result=datalab_result,
+                source_pdf="story.pdf",
+                output_dir=Path(tmp),
+            )
+
+            self.assertEqual(len(chapter["pages"]), 2)
+            self.assertEqual(chapter["pages"][0]["page_number"], 1)
+            self.assertEqual(chapter["pages"][0]["title"], "The Boy Who Broke the Bank")
+            self.assertIn("Nathu swept the steps", chapter["pages"][0]["text"])
+            self.assertNotIn("Duplicated aggregate text", chapter["pages"][0]["text"])
+
     def test_stitch_manifest_dry_run_reports_expected_outputs(self) -> None:
         chapter = _load_sample()
         artifacts = build_planning_artifacts(
