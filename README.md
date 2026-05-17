@@ -35,6 +35,21 @@ Install the optional provider SDK used for real Veo generation:
 python3 -m pip install -r requirements.txt
 ```
 
+Create a local `.env` file for API keys:
+
+```bash
+cp .env.example .env
+```
+
+Then edit `.env`:
+
+```bash
+DATALAB_API_KEY=your_datalab_key
+VERTEX_API_KEY=your_gemini_or_vertex_api_key
+```
+
+The CLI loads `.env` from the current working directory automatically. You can also pass `--env-file path/to/.env`.
+
 Extract a chapter PDF through Datalab:
 
 ```bash

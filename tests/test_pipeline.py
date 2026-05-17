@@ -1,9 +1,11 @@
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
 
+from book_to_video.cli import load_env_file
 from book_to_video.datalab_extractor import normalize_datalab_convert_result
 from book_to_video.pipeline import build_planning_artifacts
 from book_to_video.stitcher import stitch_from_manifest
@@ -194,6 +196,28 @@ class PipelineTest(unittest.TestCase):
             self.assertEqual(result["generated_clip_count"], 1)
             self.assertEqual(fake_client.start_frames, [last_frame_path])
             self.assertEqual(manifest["jobs"][1]["continuity"]["start_frame_path"], str(last_frame_path))
+
+    def test_env_file_loader_reads_keys_without_overriding_existing_env(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            env_path = Path(tmp) / ".env"
+            env_path.write_text(
+                "\n".join(
+                    [
+                        "DATALAB_API_KEY=file_datalab",
+                        'VERTEX_API_KEY="file_vertex"',
+                        "export GOOGLE_API_KEY=file_google",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            with mock.patch.dict(os.environ, {"DATALAB_API_KEY": "shell_datalab"}, clear=False):
+                loaded = load_env_file(env_path)
+
+                self.assertEqual(os.environ["DATALAB_API_KEY"], "shell_datalab")
+                self.assertEqual(os.environ["VERTEX_API_KEY"], "file_vertex")
+                self.assertEqual(os.environ["GOOGLE_API_KEY"], "file_google")
+                self.assertNotIn("DATALAB_API_KEY", loaded)
 
 
 def _load_sample() -> dict:

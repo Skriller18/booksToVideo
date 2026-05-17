@@ -18,6 +18,11 @@ def build_parser() -> argparse.ArgumentParser:
         prog="book-to-video",
         description="Plan textbook chapter videos as 2-minute episodes made from 8-second clips.",
     )
+    parser.add_argument(
+        "--env-file",
+        default=None,
+        help="Path to a .env file. Defaults to .env in the current working directory if present.",
+    )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     run = subparsers.add_parser(
@@ -163,6 +168,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
+    load_env_file(Path(args.env_file) if args.env_file else Path.cwd() / ".env")
 
     if args.command == "run":
         output_dir = Path(args.output_dir)
@@ -369,6 +375,36 @@ def main() -> None:
             f"{result['generated_clip_count']} clips, skipped {result['skipped_clip_count']}, "
             f"failed {result['failed_clip_count']}; wrote {media_root / 'veo_generation_result.json'}"
         )
+
+def load_env_file(path: Path, override: bool = False) -> dict[str, str]:
+    if not path.exists():
+        return {}
+
+    loaded: dict[str, str] = {}
+    for line_number, raw_line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[len("export ") :].strip()
+        if "=" not in line:
+            raise ValueError(f"Invalid .env line {line_number} in {path}: expected KEY=VALUE")
+
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = _parse_env_value(value.strip())
+        if not key:
+            raise ValueError(f"Invalid .env line {line_number} in {path}: empty key")
+        if override or key not in os.environ:
+            os.environ[key] = value
+            loaded[key] = value
+    return loaded
+
+
+def _parse_env_value(value: str) -> str:
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        value = value[1:-1]
+    return value
 
 
 if __name__ == "__main__":
