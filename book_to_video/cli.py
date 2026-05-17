@@ -13,7 +13,13 @@ from .pipeline import build_planning_artifacts
 from .placeholders import create_placeholder_clips
 from .progress import ProgressTracker
 from .stitcher import stitch_from_manifest
-from .veo_client import DEFAULT_VEO_MODEL, VeoGenerationOptions, generate_veo_clips_from_manifest
+from .veo_client import (
+    DEFAULT_VEO_MODEL,
+    VeoGenerationOptions,
+    _build_google_genai_client,
+    generate_veo_clips_from_manifest,
+    write_veo_operation_diagnostics,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -182,6 +188,28 @@ def build_parser() -> argparse.ArgumentParser:
     )
     veo.add_argument("--no-continuity", action="store_true", help="Do not feed prior clip frames into Veo.")
     veo.add_argument("--continuity-scope", default="episode", choices=("episode", "chapter"))
+
+    veo_inspect = subparsers.add_parser(
+        "inspect-veo-operation",
+        help="Fetch completed Veo operation details and write diagnostic JSON.",
+    )
+    veo_inspect.add_argument("--veo-manifest", required=True, help="Path to veo_manifest.json.")
+    veo_inspect.add_argument(
+        "--job-id",
+        action="append",
+        default=None,
+        help="Inspect the operation recorded for this job id. Can be passed multiple times.",
+    )
+    veo_inspect.add_argument(
+        "--operation-name",
+        action="append",
+        default=None,
+        help="Inspect an explicit operation resource name. Can be passed multiple times.",
+    )
+    veo_inspect.add_argument(
+        "--output-dir",
+        help="Directory for diagnostic JSON. Defaults to veo_diagnostics next to the manifest.",
+    )
     return parser
 
 
@@ -525,6 +553,34 @@ def main() -> None:
             f"failed {result['failed_clip_count']}; wrote {media_root / 'veo_generation_result.json'}"
         )
         progress.close()
+    elif args.command == "inspect-veo-operation":
+        manifest_path = Path(args.veo_manifest)
+        progress = ProgressTracker(total=2, description="Inspect Veo")
+        progress.write(f"Reading Veo manifest: {manifest_path}")
+        veo_manifest = read_json(manifest_path)
+        output_dir = Path(args.output_dir) if args.output_dir else manifest_path.parent / "veo_diagnostics"
+        targets = _veo_operation_targets(veo_manifest, args.job_id, args.operation_name)
+        if not targets:
+            raise SystemExit("No Veo operations selected; pass --job-id or --operation-name")
+        progress.update("Read manifest")
+
+        try:
+            from google.genai import types
+        except ImportError as exc:
+            raise SystemExit("google-genai is required to inspect Veo operations") from exc
+
+        client = _build_google_genai_client()
+        written_paths: list[Path] = []
+        for label, operation_name, job in targets:
+            progress.write(f"Fetching {label}: {operation_name}")
+            operation = client.operations.get(types.GenerateVideosOperation(name=operation_name))
+            diagnostics_path = output_dir / f"{_safe_filename(label)}_operation.json"
+            write_veo_operation_diagnostics(operation, diagnostics_path, job)
+            written_paths.append(diagnostics_path)
+
+        progress.update("Write diagnostics")
+        progress.write("Wrote Veo diagnostics: " + ", ".join(str(path) for path in written_paths))
+        progress.close()
 
 
 def _progress_callback(progress: ProgressTracker):
@@ -571,6 +627,39 @@ def _format_job_id_sample(job_ids: list[str], limit: int = 10) -> str:
     if len(job_ids) > limit:
         return f"{sample}, ... ({len(job_ids)} total)"
     return sample
+
+
+def _veo_operation_targets(
+    veo_manifest: dict[str, Any],
+    job_ids: list[str] | None,
+    operation_names: list[str] | None,
+) -> list[tuple[str, str, dict[str, Any] | None]]:
+    targets: list[tuple[str, str, dict[str, Any] | None]] = []
+    jobs = veo_manifest.get("jobs", [])
+    jobs_by_id = {
+        str(job.get("job_id")): job
+        for job in jobs
+        if isinstance(job, dict) and job.get("job_id")
+    } if isinstance(jobs, list) else {}
+
+    for job_id in job_ids or []:
+        job = jobs_by_id.get(job_id)
+        if not job:
+            raise SystemExit(f"No job found in manifest for {job_id}")
+        operation_name = job.get("operation_name")
+        if not operation_name:
+            raise SystemExit(f"No operation_name recorded for {job_id}")
+        targets.append((job_id, str(operation_name), job))
+
+    for operation_name in operation_names or []:
+        label = Path(operation_name).name or "operation"
+        targets.append((label, operation_name, None))
+
+    return targets
+
+
+def _safe_filename(value: str) -> str:
+    return "".join(character if character.isalnum() or character in {"-", "_"} else "_" for character in value)
 
 
 def load_env_file(path: Path, override: bool = False) -> dict[str, str]:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -7,6 +8,8 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
+
+from .prompts import build_audio_direction, sanitize_veo_text
 
 
 DEFAULT_VEO_MODEL = "veo-3.1-generate-preview"
@@ -31,6 +34,7 @@ class VeoGenerationOptions:
     ffmpeg_path: str | None = None
     failed_only: bool = False
     job_ids: tuple[str, ...] | None = None
+    diagnostics_dir: Path | None = None
 
 
 def generate_veo_clips_from_manifest(
@@ -120,6 +124,7 @@ def generate_veo_clips_from_manifest(
             if persist_manifest:
                 persist_manifest(veo_manifest)
 
+            _sanitize_job_for_veo(job)
             operation = _submit_video_generation(generator, job, options, start_frame_path)
             job["operation_name"] = getattr(operation, "name", None) or job.get("operation_name")
             if progress:
@@ -127,7 +132,13 @@ def generate_veo_clips_from_manifest(
             operation = _poll_operation(generator, operation, options)
             if progress:
                 progress(f"saving {job_label}", job_index, total_jobs)
-            _save_generated_video(generator, operation, output_path)
+            _save_generated_video(
+                generator,
+                operation,
+                output_path,
+                _diagnostics_path(media_root, job, options),
+                job,
+            )
             previous_last_frame = _ensure_last_frame(job, output_path, media_root, options)
 
             job["status"] = "completed"
@@ -155,6 +166,14 @@ def generate_veo_clips_from_manifest(
         "failed_clip_count": failed_count,
         "jobs": result_jobs,
     }
+
+
+def write_veo_operation_diagnostics(
+    operation: Any,
+    diagnostics_path: Path,
+    job: dict[str, Any] | None = None,
+) -> None:
+    _write_operation_diagnostics(diagnostics_path, operation, job)
 
 
 def _build_google_genai_client() -> Any:
@@ -207,7 +226,7 @@ def _submit_video_generation(
     try:
         kwargs: dict[str, Any] = {
             "model": options.model,
-            "prompt": job["prompt"],
+            "prompt": sanitize_veo_text(job["prompt"]),
             "config": config,
         }
         if start_frame_path:
@@ -215,6 +234,19 @@ def _submit_video_generation(
         return generator.models.generate_videos(**kwargs)
     except Exception as exc:
         raise VeoGenerationError(f"Veo submit failed for {job.get('job_id', 'unknown job')}: {exc}") from exc
+
+
+def _sanitize_job_for_veo(job: dict[str, Any]) -> None:
+    if "prompt" in job:
+        job["prompt"] = sanitize_veo_text(str(job["prompt"]))
+    audio = job.get("audio")
+    if isinstance(audio, dict):
+        if "spoken_line" in audio:
+            audio["spoken_line"] = sanitize_veo_text(str(audio["spoken_line"]))
+        if audio.get("spoken_line"):
+            audio["audio_direction"] = build_audio_direction(str(audio["spoken_line"]))
+        elif "audio_direction" in audio:
+            audio["audio_direction"] = sanitize_veo_text(str(audio["audio_direction"]))
 
 
 def _build_google_image(types: Any, image_path: Path) -> Any:
@@ -251,7 +283,13 @@ def _poll_operation(generator: Any, operation: Any, options: VeoGenerationOption
     raise VeoGenerationError(f"Veo operation did not complete after {options.max_polls} polls: {operation_name}")
 
 
-def _save_generated_video(generator: Any, operation: Any, output_path: Path) -> None:
+def _save_generated_video(
+    generator: Any,
+    operation: Any,
+    output_path: Path,
+    diagnostics_path: Path | None = None,
+    job: dict[str, Any] | None = None,
+) -> None:
     if hasattr(generator, "save_generated_video"):
         generator.save_generated_video(operation, output_path)
         return
@@ -259,6 +297,12 @@ def _save_generated_video(generator: Any, operation: Any, output_path: Path) -> 
     response = getattr(operation, "response", None)
     generated_videos = getattr(response, "generated_videos", None) if response else None
     if not generated_videos:
+        if diagnostics_path:
+            _write_operation_diagnostics(diagnostics_path, operation, job)
+            raise VeoGenerationError(
+                "Veo operation completed without generated_videos; "
+                f"wrote diagnostics to {diagnostics_path}"
+            )
         raise VeoGenerationError("Veo operation completed without generated_videos")
 
     video = generated_videos[0].video
@@ -273,6 +317,80 @@ def _save_generated_video(generator: Any, operation: Any, output_path: Path) -> 
         output_path.write_bytes(video_bytes)
         return
     raise VeoGenerationError("Could not save generated video from Google Gen AI SDK response")
+
+
+def _diagnostics_path(media_root: Path, job: dict[str, Any], options: VeoGenerationOptions) -> Path:
+    diagnostics_dir = options.diagnostics_dir or media_root / "veo_diagnostics"
+    job_id = str(job.get("job_id") or Path(str(job.get("output_path") or "clip")).stem)
+    return diagnostics_dir / f"{job_id}_operation.json"
+
+
+def _write_operation_diagnostics(
+    diagnostics_path: Path,
+    operation: Any,
+    job: dict[str, Any] | None,
+) -> None:
+    diagnostics_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "written_at": _now_epoch(),
+        "job": _diagnostic_job_payload(job or {}),
+        "operation": _safe_serialize(operation),
+        "operation_repr": repr(operation),
+    }
+    diagnostics_path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def _diagnostic_job_payload(job: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "job_id": job.get("job_id"),
+        "status": job.get("status"),
+        "operation_name": job.get("operation_name"),
+        "output_path": job.get("output_path"),
+        "veo_model": job.get("veo_model"),
+        "duration_seconds": job.get("duration_seconds"),
+        "continuity": job.get("continuity"),
+        "error": job.get("error"),
+    }
+
+
+def _safe_serialize(value: Any, depth: int = 0) -> Any:
+    if depth > 8:
+        return repr(value)
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, bytes):
+        return f"<bytes {len(value)}>"
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, dict):
+        return {
+            str(key): _safe_serialize(item, depth + 1)
+            for key, item in value.items()
+            if not _is_sensitive_key(str(key))
+        }
+    if isinstance(value, (list, tuple, set)):
+        return [_safe_serialize(item, depth + 1) for item in value]
+    if hasattr(value, "model_dump"):
+        try:
+            return _safe_serialize(value.model_dump(), depth + 1)
+        except Exception:
+            pass
+    if hasattr(value, "to_dict"):
+        try:
+            return _safe_serialize(value.to_dict(), depth + 1)
+        except Exception:
+            pass
+    if hasattr(value, "__dict__"):
+        return _safe_serialize(vars(value), depth + 1)
+    return repr(value)
+
+
+def _is_sensitive_key(key: str) -> bool:
+    lowered = key.lower()
+    return any(marker in lowered for marker in ("api_key", "apikey", "token", "authorization", "secret"))
 
 
 def _should_skip_job(job: dict[str, Any], output_path: Path, options: VeoGenerationOptions) -> tuple[bool, str]:
