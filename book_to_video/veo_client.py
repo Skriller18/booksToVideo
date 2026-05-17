@@ -4,7 +4,9 @@ import json
 import os
 import shutil
 import subprocess
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -35,6 +37,7 @@ class VeoGenerationOptions:
     failed_only: bool = False
     job_ids: tuple[str, ...] | None = None
     diagnostics_dir: Path | None = None
+    episode_parallelism: int = 1
 
 
 def generate_veo_clips_from_manifest(
@@ -55,8 +58,41 @@ def generate_veo_clips_from_manifest(
     if not isinstance(jobs, list):
         raise VeoGenerationError("veo_manifest.json must include a jobs array")
 
-    generator = client or _build_google_genai_client()
     media_root.mkdir(parents=True, exist_ok=True)
+    if _can_parallelize_by_episode(options):
+        return _generate_episode_groups_in_parallel(
+            veo_manifest=veo_manifest,
+            jobs=jobs,
+            media_root=media_root,
+            options=options,
+            persist_manifest=persist_manifest,
+            client=client,
+            progress=progress,
+        )
+
+    generator = client or _build_google_genai_client()
+    return _generate_job_sequence(
+        veo_manifest=veo_manifest,
+        indexed_jobs=list(enumerate(jobs, start=1)),
+        media_root=media_root,
+        options=options,
+        generator=generator,
+        persist_manifest=persist_manifest,
+        progress=progress,
+        total_jobs=len(jobs),
+    )
+
+
+def _generate_job_sequence(
+    veo_manifest: dict[str, Any],
+    indexed_jobs: list[tuple[int, Any]],
+    media_root: Path,
+    options: VeoGenerationOptions,
+    generator: Any,
+    persist_manifest: Callable[[dict[str, Any]], None] | None,
+    progress: ProgressCallback | None,
+    total_jobs: int,
+) -> dict[str, Any]:
 
     result_jobs: list[dict[str, Any]] = []
     generated_count = 0
@@ -65,8 +101,7 @@ def generate_veo_clips_from_manifest(
     previous_last_frame: Path | None = None
     previous_scope_key: str | None = None
 
-    total_jobs = len(jobs)
-    for job_index, job in enumerate(jobs, start=1):
+    for job_index, job in indexed_jobs:
         if not isinstance(job, dict):
             continue
 
@@ -166,6 +201,86 @@ def generate_veo_clips_from_manifest(
         "failed_clip_count": failed_count,
         "jobs": result_jobs,
     }
+
+
+def _generate_episode_groups_in_parallel(
+    veo_manifest: dict[str, Any],
+    jobs: list[Any],
+    media_root: Path,
+    options: VeoGenerationOptions,
+    persist_manifest: Callable[[dict[str, Any]], None] | None,
+    client: Any | None,
+    progress: ProgressCallback | None,
+) -> dict[str, Any]:
+    persist_lock = threading.Lock()
+    progress_lock = threading.Lock()
+
+    def locked_persist(payload: dict[str, Any]) -> None:
+        if not persist_manifest:
+            return
+        with persist_lock:
+            persist_manifest(payload)
+
+    def locked_progress(message: str, current: int | None = None, total: int | None = None) -> None:
+        if not progress:
+            return
+        with progress_lock:
+            progress(message, current, total)
+
+    groups = _episode_job_groups(jobs)
+    max_workers = max(1, min(options.episode_parallelism, len(groups)))
+    results: list[dict[str, Any]] = []
+
+    def run_group(group: list[tuple[int, Any]]) -> dict[str, Any]:
+        generator = client or _build_google_genai_client()
+        return _generate_job_sequence(
+            veo_manifest=veo_manifest,
+            indexed_jobs=group,
+            media_root=media_root,
+            options=options,
+            generator=generator,
+            persist_manifest=locked_persist,
+            progress=locked_progress,
+            total_jobs=len(jobs),
+        )
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [executor.submit(run_group, group) for group in groups]
+        for future in as_completed(futures):
+            results.append(future.result())
+
+    result_jobs = [
+        job_result
+        for result in results
+        for job_result in result.get("jobs", [])
+    ]
+    result_jobs.sort(key=lambda item: str(item.get("job_id") or ""))
+    return {
+        "generated_clip_count": sum(int(result.get("generated_clip_count", 0)) for result in results),
+        "skipped_clip_count": sum(int(result.get("skipped_clip_count", 0)) for result in results),
+        "failed_clip_count": sum(int(result.get("failed_clip_count", 0)) for result in results),
+        "parallelism": max_workers,
+        "parallelism_mode": "episode",
+        "jobs": result_jobs,
+    }
+
+
+def _can_parallelize_by_episode(options: VeoGenerationOptions) -> bool:
+    return (
+        options.episode_parallelism > 1
+        and options.continuity_scope == "episode"
+        and options.limit is None
+    )
+
+
+def _episode_job_groups(jobs: list[Any]) -> list[list[tuple[int, Any]]]:
+    groups_by_episode: dict[str, list[tuple[int, Any]]] = {}
+    for index, job in enumerate(jobs, start=1):
+        if not isinstance(job, dict):
+            continue
+        episode_id = str(job.get("episode_id") or "episode")
+        groups_by_episode.setdefault(episode_id, []).append((index, job))
+    return list(groups_by_episode.values())
 
 
 def write_veo_operation_diagnostics(

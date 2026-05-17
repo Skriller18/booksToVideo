@@ -75,6 +75,12 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--overwrite-existing", action="store_true")
     run.add_argument("--no-continuity", action="store_true", help="Do not feed prior clip frames into Veo.")
     run.add_argument("--continuity-scope", default="episode", choices=("episode", "chapter"))
+    run.add_argument(
+        "--episode-parallelism",
+        type=int,
+        default=1,
+        help="Generate this many episodes in parallel while preserving clip order within each episode.",
+    )
     run.add_argument("--mock-clips", action="store_true", help="Create placeholder clips instead of calling Veo.")
     run.add_argument("--mock-duration", type=float, default=None, help="Override placeholder duration.")
     run.add_argument("--episodes-only", action="store_true", help="Skip the full chapter playlist video.")
@@ -202,6 +208,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     veo.add_argument("--no-continuity", action="store_true", help="Do not feed prior clip frames into Veo.")
     veo.add_argument("--continuity-scope", default="episode", choices=("episode", "chapter"))
+    veo.add_argument(
+        "--episode-parallelism",
+        type=int,
+        default=1,
+        help="Generate this many episodes in parallel while preserving clip order within each episode.",
+    )
 
     veo_inspect = subparsers.add_parser(
         "inspect-veo-operation",
@@ -332,6 +344,7 @@ def main() -> None:
                 skip_existing=not args.overwrite_existing,
                 continuity_enabled=not args.no_continuity,
                 continuity_scope=args.continuity_scope,
+                episode_parallelism=args.episode_parallelism,
             )
             clip_jobs = artifacts["veo_manifest"].get("jobs", [])
             clip_progress = pipeline_progress.child(len(clip_jobs), "Veo clips")
@@ -549,6 +562,7 @@ def main() -> None:
             skip_existing=not args.overwrite_existing,
             continuity_enabled=not args.no_continuity,
             continuity_scope=args.continuity_scope,
+            episode_parallelism=args.episode_parallelism,
             failed_only=args.failed_only,
             job_ids=tuple(args.job_id) if args.job_id else None,
         )
