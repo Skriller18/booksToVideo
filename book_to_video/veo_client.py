@@ -24,7 +24,7 @@ class VeoGenerationError(RuntimeError):
 @dataclass(frozen=True)
 class VeoGenerationOptions:
     model: str = DEFAULT_VEO_MODEL
-    aspect_ratio: str = "16:9"
+    aspect_ratio: str = "9:16"
     resolution: str = "720p"
     person_generation: str = "allow_all"
     poll_interval_seconds: int = 10

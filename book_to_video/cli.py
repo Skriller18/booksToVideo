@@ -69,7 +69,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     run.add_argument("--veo-poll-interval", type=int, default=10)
     run.add_argument("--veo-max-polls", type=int, default=60)
-    run.add_argument("--aspect-ratio", default="16:9", choices=("16:9", "9:16"))
+    run.add_argument("--aspect-ratio", default="9:16", choices=("16:9", "9:16"))
     run.add_argument("--resolution", default="720p", choices=("720p", "1080p", "4k"))
     run.add_argument("--person-generation", default="allow_all")
     run.add_argument("--overwrite-existing", action="store_true")
@@ -198,7 +198,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     veo.add_argument("--poll-interval", type=int, default=10, help="Seconds between Veo operation polls.")
     veo.add_argument("--max-polls", type=int, default=60, help="Maximum polls per clip before failing it.")
-    veo.add_argument("--aspect-ratio", default="16:9", choices=("16:9", "9:16"))
+    veo.add_argument("--aspect-ratio", default="9:16", choices=("16:9", "9:16"))
     veo.add_argument("--resolution", default="720p", choices=("720p", "1080p", "4k"))
     veo.add_argument("--person-generation", default="allow_all")
     veo.add_argument(
