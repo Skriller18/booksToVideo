@@ -34,6 +34,63 @@ class PipelineTest(unittest.TestCase):
         self.assertEqual(first_job["audio"]["mode"], "native")
         self.assertIn("Indian English teacher voice", first_job["audio"]["voice_profile"])
         self.assertIn("Native audio", first_job["prompt"])
+        self.assertNotIn("Step 1", first_job["audio"]["spoken_line"])
+
+    def test_orchestrator_keeps_flow_continuous_and_uses_few_references(self) -> None:
+        chapter = _load_sample()
+        artifacts = build_planning_artifacts(
+            chapter,
+            target_episode_count=1,
+            clips_per_episode=8,
+            clip_duration_seconds=8,
+        )
+
+        clips = artifacts["storyboard"]["clips"]
+        jobs = artifacts["veo_manifest"]["jobs"]
+        referenced_jobs = [job for job in jobs if job["reference_images"]]
+
+        self.assertTrue(clips)
+        self.assertTrue(referenced_jobs)
+        self.assertLess(len(referenced_jobs), len(jobs))
+        self.assertTrue(all("Step " not in clip["narration"] for clip in clips))
+        self.assertEqual(clips[0]["metadata"]["orchestrator"], "deterministic_microdrama")
+        self.assertEqual(clips[0]["metadata"]["illustration_policy"], "no_reference_image")
+        self.assertIn("do not introduce textbook reference images", jobs[0]["prompt"])
+
+    def test_orchestrator_rejects_single_unrelated_logo_asset(self) -> None:
+        chapter = {
+            "chapter_id": "chapter_banking_story",
+            "title": "The Boy Who Broke the Bank",
+            "topics": [
+                {
+                    "topic_id": "topic_01",
+                    "title": "Rumours in the Bazaar",
+                    "source_pages": [1],
+                    "text": "A rumour spreads through the bazaar and changes how people behave.",
+                    "learning_goal": "Students understand how rumours can spread and affect a community.",
+                    "illustrations": [
+                        {
+                            "illustration_id": "publisher_logo",
+                            "path": "assets/publisher_logo.png",
+                            "caption": "Publisher logo",
+                            "page_number": 1,
+                        }
+                    ],
+                }
+            ],
+        }
+
+        artifacts = build_planning_artifacts(
+            chapter,
+            target_episode_count=1,
+            clips_per_episode=6,
+            clip_duration_seconds=8,
+        )
+
+        self.assertTrue(all(not job["reference_images"] for job in artifacts["veo_manifest"]["jobs"]))
+        self.assertTrue(
+            all(not clip["reference_illustrations"] for clip in artifacts["storyboard"]["clips"])
+        )
 
     def test_veo_text_sanitizer_removes_real_person_author_reference(self) -> None:
         text = (
@@ -82,6 +139,38 @@ class PipelineTest(unittest.TestCase):
             self.assertEqual(len(chapter["topics"]), 2)
             self.assertEqual(chapter["topics"][0]["illustrations"][0]["illustration_id"], "illustration_001")
             self.assertTrue(Path(chapter["topics"][0]["illustrations"][0]["path"]).exists())
+            self.assertTrue(chapter["topics"][0]["illustrations"][0]["is_lesson_asset"])
+
+    def test_datalab_filters_machine_and_publisher_assets_from_topics(self) -> None:
+        one_pixel_png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+        datalab_result = {
+            "status": "complete",
+            "success": True,
+            "json": {
+                "pages": [
+                    {
+                        "page_number": 1,
+                        "text": "The Sun gives us heat and light.",
+                    }
+                ]
+            },
+            "images": {
+                "page_1_publisher_logo.png": one_pixel_png,
+                "page_1_qr_code.png": one_pixel_png,
+                "page_1_sun_diagram.png": one_pixel_png,
+            },
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            chapter = normalize_datalab_convert_result(
+                datalab_result=datalab_result,
+                source_pdf="sun.pdf",
+                output_dir=Path(tmp),
+            )
+
+            illustrations = chapter["topics"][0]["illustrations"]
+            self.assertEqual([item["source_filename"] for item in illustrations], ["page_1_sun_diagram.png"])
+            self.assertEqual(illustrations[0]["asset_type"], "candidate_lesson_illustration")
 
     def test_datalab_json_children_normalizes_without_markdown(self) -> None:
         datalab_result = {
