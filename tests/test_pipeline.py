@@ -540,6 +540,86 @@ class PipelineTest(unittest.TestCase):
             self.assertEqual(fake_client.start_frames, [last_frame_path])
             self.assertEqual(manifest["jobs"][1]["continuity"]["start_frame_path"], str(last_frame_path))
 
+    def test_veo_generation_can_parallelize_across_episodes(self) -> None:
+        manifest = {
+            "jobs": [
+                {
+                    "job_id": "veo_0001",
+                    "episode_id": "episode_01",
+                    "duration_seconds": 8,
+                    "prompt": "Episode one opening.",
+                    "output_path": "clips/clip_0001.mp4",
+                    "status": "pending",
+                },
+                {
+                    "job_id": "veo_0002",
+                    "episode_id": "episode_02",
+                    "duration_seconds": 8,
+                    "prompt": "Episode two opening.",
+                    "output_path": "clips/clip_0002.mp4",
+                    "status": "pending",
+                },
+            ]
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            fake_client = FakeVeoClient()
+            result = generate_veo_clips_from_manifest(
+                veo_manifest=manifest,
+                media_root=Path(tmp),
+                options=VeoGenerationOptions(
+                    poll_interval_seconds=0,
+                    max_polls=1,
+                    continuity_enabled=False,
+                    episode_parallelism=2,
+                ),
+                client=fake_client,
+            )
+
+            self.assertEqual(result["generated_clip_count"], 2)
+            self.assertEqual(result["parallelism"], 2)
+            self.assertEqual(result["parallelism_mode"], "episode")
+            self.assertEqual({job["status"] for job in manifest["jobs"]}, {"completed"})
+
+    def test_veo_generation_does_not_parallelize_chapter_continuity(self) -> None:
+        manifest = {
+            "jobs": [
+                {
+                    "job_id": "veo_0001",
+                    "episode_id": "episode_01",
+                    "duration_seconds": 8,
+                    "prompt": "Episode one opening.",
+                    "output_path": "clips/clip_0001.mp4",
+                    "status": "pending",
+                },
+                {
+                    "job_id": "veo_0002",
+                    "episode_id": "episode_02",
+                    "duration_seconds": 8,
+                    "prompt": "Episode two opening.",
+                    "output_path": "clips/clip_0002.mp4",
+                    "status": "pending",
+                },
+            ]
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            result = generate_veo_clips_from_manifest(
+                veo_manifest=manifest,
+                media_root=Path(tmp),
+                options=VeoGenerationOptions(
+                    poll_interval_seconds=0,
+                    max_polls=1,
+                    continuity_enabled=False,
+                    continuity_scope="chapter",
+                    episode_parallelism=2,
+                ),
+                client=FakeVeoClient(),
+            )
+
+            self.assertEqual(result["generated_clip_count"], 2)
+            self.assertNotIn("parallelism_mode", result)
+
     def test_env_file_loader_reads_keys_without_overriding_existing_env(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             env_path = Path(tmp) / ".env"
