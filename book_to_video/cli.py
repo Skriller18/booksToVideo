@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import os
-from datetime import datetime
 from pathlib import Path
 
 from .datalab_client import DatalabConvertClient, DatalabConvertOptions
@@ -10,6 +9,7 @@ from .datalab_extractor import normalize_datalab_convert_result
 from .io_utils import read_json, write_json
 from .pipeline import build_planning_artifacts
 from .placeholders import create_placeholder_clips
+from .progress import ProgressTracker
 from .stitcher import stitch_from_manifest
 from .veo_client import DEFAULT_VEO_MODEL, VeoGenerationOptions, generate_veo_clips_from_manifest
 
@@ -174,10 +174,11 @@ def main() -> None:
     if args.command == "run":
         output_dir = Path(args.output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
-        _log(f"Starting pipeline; output directory: {output_dir}")
+        pipeline_progress = ProgressTracker(total=5, description="Pipeline")
+        pipeline_progress.write(f"Output directory: {output_dir}")
 
         if args.raw_json:
-            _log(f"Reading saved Datalab response: {args.raw_json}")
+            pipeline_progress.write(f"Reading saved Datalab response: {args.raw_json}")
             datalab_result = read_json(Path(args.raw_json))
             source_pdf = args.pdf or datalab_result.get("source_pdf") or "unknown.pdf"
         else:
@@ -195,18 +196,21 @@ def main() -> None:
                 page_range=args.page_range,
                 skip_cache=args.skip_cache,
             )
+            datalab_progress = pipeline_progress.child(args.max_polls, "Datalab polling")
             datalab_result = client.convert_pdf(
                 Path(args.pdf),
                 options=datalab_options,
                 poll_interval_seconds=args.poll_interval,
                 max_polls=args.max_polls,
-                progress=_log,
+                progress=_progress_callback(datalab_progress),
             )
+            datalab_progress.close()
             source_pdf = args.pdf
             write_json(output_dir / "raw_datalab_convert.json", datalab_result)
-            _log(f"Wrote raw Datalab response: {output_dir / 'raw_datalab_convert.json'}")
+            pipeline_progress.write(f"Wrote raw Datalab response: {output_dir / 'raw_datalab_convert.json'}")
+        pipeline_progress.update("Datalab extraction")
 
-        _log("Normalizing Datalab response into chapter extraction")
+        pipeline_progress.write("Normalizing Datalab response into chapter extraction")
         chapter = normalize_datalab_convert_result(
             datalab_result=datalab_result,
             source_pdf=source_pdf,
@@ -215,12 +219,13 @@ def main() -> None:
             chapter_title=args.chapter_title,
         )
         write_json(output_dir / "chapter_extraction.json", chapter)
-        _log(
+        pipeline_progress.write(
             "Wrote chapter extraction: "
             f"{len(chapter['pages'])} pages, {len(chapter['topics'])} topics"
         )
+        pipeline_progress.update("Chapter normalization")
 
-        _log("Building episode plan, storyboard, Veo manifest, and stitch manifest")
+        pipeline_progress.write("Building episode plan, storyboard, Veo manifest, and stitch manifest")
         artifacts = build_planning_artifacts(
             chapter,
             target_episode_count=args.episode_count,
@@ -231,24 +236,28 @@ def main() -> None:
         write_json(output_dir / "storyboard.json", artifacts["storyboard"])
         write_json(output_dir / "veo_manifest.json", artifacts["veo_manifest"])
         write_json(output_dir / "stitch_manifest.json", artifacts["stitch_manifest"])
-        _log(
+        pipeline_progress.write(
             "Wrote planning artifacts: "
             f"{artifacts['episode_plan']['episode_count']} episodes, "
             f"{artifacts['storyboard']['clip_count']} clips"
         )
+        pipeline_progress.update("Planning")
 
         if args.mock_clips:
-            _log("Creating placeholder clips")
+            pipeline_progress.write("Creating placeholder clips")
+            clip_jobs = artifacts["veo_manifest"].get("jobs", [])
+            clip_progress = pipeline_progress.child(len(clip_jobs), "Mock clips")
             clip_result = create_placeholder_clips(
                 veo_manifest=artifacts["veo_manifest"],
                 media_root=output_dir,
                 duration_override=args.mock_duration,
-                progress=_log,
+                progress=_progress_callback(clip_progress),
             )
+            clip_progress.close()
             write_json(output_dir / "mock_clips_result.json", clip_result)
-            _log(f"Wrote mock clip result: {clip_result['created_clip_count']} clips")
+            pipeline_progress.write(f"Wrote mock clip result: {clip_result['created_clip_count']} clips")
         else:
-            _log("Generating Veo clips")
+            pipeline_progress.write("Generating Veo clips")
             veo_options = VeoGenerationOptions(
                 model=args.veo_model,
                 aspect_ratio=args.aspect_ratio,
@@ -261,22 +270,26 @@ def main() -> None:
                 continuity_enabled=not args.no_continuity,
                 continuity_scope=args.continuity_scope,
             )
+            clip_jobs = artifacts["veo_manifest"].get("jobs", [])
+            clip_progress = pipeline_progress.child(len(clip_jobs), "Veo clips")
             clip_result = generate_veo_clips_from_manifest(
                 veo_manifest=artifacts["veo_manifest"],
                 media_root=output_dir,
                 options=veo_options,
                 persist_manifest=lambda payload: write_json(output_dir / "veo_manifest.json", payload),
-                progress=_log,
+                progress=_progress_callback(clip_progress),
             )
+            clip_progress.close()
             write_json(output_dir / "veo_generation_result.json", clip_result)
-            _log(
+            pipeline_progress.write(
                 "Wrote Veo generation result: "
                 f"{clip_result['generated_clip_count']} generated, "
                 f"{clip_result['skipped_clip_count']} skipped, "
                 f"{clip_result['failed_clip_count']} failed"
             )
+        pipeline_progress.update("Clip generation")
 
-        _log("Stitching episode and chapter videos")
+        pipeline_progress.write("Stitching episode and chapter videos")
         stitch_manifest = read_json(output_dir / "stitch_manifest.json")
         stitch_result = stitch_from_manifest(
             stitch_manifest=stitch_manifest,
@@ -286,13 +299,17 @@ def main() -> None:
             copy_codecs=args.copy_codecs,
         )
         write_json(output_dir / "stitch_result.json", stitch_result)
-        _log(f"Completed pipeline; wrote artifacts and videos under {output_dir}")
+        pipeline_progress.update("Stitching")
+        pipeline_progress.write(f"Completed pipeline; wrote artifacts and videos under {output_dir}")
+        pipeline_progress.close()
     elif args.command == "plan":
         chapter_path = Path(args.chapter_json)
         output_dir = Path(args.output_dir)
-        _log(f"Reading chapter extraction: {chapter_path}")
+        progress = ProgressTracker(total=2, description="Plan")
+        progress.write(f"Reading chapter extraction: {chapter_path}")
         chapter = read_json(chapter_path)
-        _log("Building planning artifacts")
+        progress.update("Read chapter")
+        progress.write("Building planning artifacts")
         artifacts = build_planning_artifacts(
             chapter,
             target_episode_count=args.episode_count,
@@ -306,18 +323,21 @@ def main() -> None:
         write_json(output_dir / "veo_manifest.json", artifacts["veo_manifest"])
         write_json(output_dir / "stitch_manifest.json", artifacts["stitch_manifest"])
 
-        _log(
+        progress.update("Write planning artifacts")
+        progress.write(
             f"Wrote planning artifacts to {output_dir}: "
             f"{artifacts['episode_plan']['episode_count']} episodes, "
             f"{artifacts['storyboard']['clip_count']} clips"
         )
+        progress.close()
     elif args.command == "extract-datalab":
         output_dir = Path(args.output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
-        _log(f"Starting Datalab extraction; output directory: {output_dir}")
+        progress = ProgressTracker(total=2, description="Extract")
+        progress.write(f"Output directory: {output_dir}")
 
         if args.raw_json:
-            _log(f"Reading saved Datalab response: {args.raw_json}")
+            progress.write(f"Reading saved Datalab response: {args.raw_json}")
             datalab_result = read_json(Path(args.raw_json))
             source_pdf = args.pdf or datalab_result.get("source_pdf") or "unknown.pdf"
         else:
@@ -335,18 +355,21 @@ def main() -> None:
                 page_range=args.page_range,
                 skip_cache=args.skip_cache,
             )
+            datalab_progress = progress.child(args.max_polls, "Datalab polling")
             datalab_result = client.convert_pdf(
                 Path(args.pdf),
                 options=options,
                 poll_interval_seconds=args.poll_interval,
                 max_polls=args.max_polls,
-                progress=_log,
+                progress=_progress_callback(datalab_progress),
             )
+            datalab_progress.close()
             source_pdf = args.pdf
             write_json(output_dir / "raw_datalab_convert.json", datalab_result)
-            _log(f"Wrote raw Datalab response: {output_dir / 'raw_datalab_convert.json'}")
+            progress.write(f"Wrote raw Datalab response: {output_dir / 'raw_datalab_convert.json'}")
+        progress.update("Datalab response")
 
-        _log("Normalizing Datalab response into chapter extraction")
+        progress.write("Normalizing Datalab response into chapter extraction")
         chapter = normalize_datalab_convert_result(
             datalab_result=datalab_result,
             source_pdf=source_pdf,
@@ -355,18 +378,22 @@ def main() -> None:
             chapter_title=args.chapter_title,
         )
         write_json(output_dir / "chapter_extraction.json", chapter)
-        _log(
+        progress.update("Chapter extraction")
+        progress.write(
             f"Wrote Datalab chapter extraction to {output_dir / 'chapter_extraction.json'}: "
             f"{len(chapter['pages'])} pages, {len(chapter['topics'])} topics"
         )
+        progress.close()
     elif args.command == "stitch":
         manifest_path = Path(args.stitch_manifest)
-        _log(f"Reading stitch manifest: {manifest_path}")
+        progress = ProgressTracker(total=2, description="Stitch")
+        progress.write(f"Reading stitch manifest: {manifest_path}")
         stitch_manifest = read_json(manifest_path)
+        progress.update("Read stitch manifest")
         media_root = Path(args.media_root) if args.media_root else manifest_path.parent
         output_dir = Path(args.output_dir) if args.output_dir else manifest_path.parent
 
-        _log("Running stitching" if not args.dry_run else "Planning stitching dry run")
+        progress.write("Running stitching" if not args.dry_run else "Planning stitching dry run")
         result = stitch_from_manifest(
             stitch_manifest=stitch_manifest,
             media_root=media_root,
@@ -377,26 +404,36 @@ def main() -> None:
         )
         write_json(output_dir / "stitch_result.json", result)
         action = "Planned" if args.dry_run else "Completed"
-        _log(f"{action} stitching; wrote {output_dir / 'stitch_result.json'}")
+        progress.update("Write stitch result")
+        progress.write(f"{action} stitching; wrote {output_dir / 'stitch_result.json'}")
+        progress.close()
     elif args.command == "mock-clips":
         manifest_path = Path(args.veo_manifest)
-        _log(f"Reading Veo manifest: {manifest_path}")
+        progress = ProgressTracker(total=2, description="Mock clips")
+        progress.write(f"Reading Veo manifest: {manifest_path}")
         veo_manifest = read_json(manifest_path)
+        progress.update("Read Veo manifest")
         media_root = Path(args.media_root) if args.media_root else manifest_path.parent
-        _log("Creating placeholder clips")
+        clip_jobs = veo_manifest.get("jobs", [])
+        clip_progress = progress.child(len(clip_jobs), "Mock clips")
         result = create_placeholder_clips(
             veo_manifest=veo_manifest,
             media_root=media_root,
             limit=args.limit,
             duration_override=args.duration,
-            progress=_log,
+            progress=_progress_callback(clip_progress),
         )
+        clip_progress.close()
         write_json(media_root / "mock_clips_result.json", result)
-        _log(f"Created {result['created_clip_count']} placeholder clips under {media_root}")
+        progress.update("Create placeholder clips")
+        progress.write(f"Created {result['created_clip_count']} placeholder clips under {media_root}")
+        progress.close()
     elif args.command == "generate-veo":
         manifest_path = Path(args.veo_manifest)
-        _log(f"Reading Veo manifest: {manifest_path}")
+        progress = ProgressTracker(total=2, description="Generate Veo")
+        progress.write(f"Reading Veo manifest: {manifest_path}")
         veo_manifest = read_json(manifest_path)
+        progress.update("Read Veo manifest")
         media_root = Path(args.media_root) if args.media_root else manifest_path.parent
         options = VeoGenerationOptions(
             model=args.model,
@@ -411,25 +448,41 @@ def main() -> None:
             continuity_scope=args.continuity_scope,
         )
 
-        _log("Generating Veo clips")
+        clip_jobs = veo_manifest.get("jobs", [])
+        clip_progress = progress.child(len(clip_jobs), "Veo clips")
         result = generate_veo_clips_from_manifest(
             veo_manifest=veo_manifest,
             media_root=media_root,
             options=options,
             persist_manifest=lambda payload: write_json(manifest_path, payload),
-            progress=_log,
+            progress=_progress_callback(clip_progress),
         )
+        clip_progress.close()
         write_json(media_root / "veo_generation_result.json", result)
-        _log(
+        progress.update("Generate Veo clips")
+        progress.write(
             "Generated "
             f"{result['generated_clip_count']} clips, skipped {result['skipped_clip_count']}, "
             f"failed {result['failed_clip_count']}; wrote {media_root / 'veo_generation_result.json'}"
         )
+        progress.close()
 
 
-def _log(message: str) -> None:
-    timestamp = datetime.now().strftime("%H:%M:%S")
-    print(f"[{timestamp}] {message}", flush=True)
+def _progress_callback(progress: ProgressTracker):
+    state = {"current": 0}
+
+    def callback(message: str, current: int | None = None, total: int | None = None) -> None:
+        if current is None:
+            progress.write(message)
+            return
+        delta = current - state["current"]
+        if delta > 0:
+            progress.update(message, advance=delta)
+            state["current"] = current
+        else:
+            progress.write(message)
+
+    return callback
 
 def load_env_file(path: Path, override: bool = False) -> dict[str, str]:
     if not path.exists():

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+import sys
 from typing import Any
 
 
@@ -16,6 +17,7 @@ class ProgressTracker:
         self.current = 0
         self._bar: Any | None = None
         self._tqdm: Any | None = None
+        self._fallback_active = False
         try:
             from tqdm import tqdm
 
@@ -29,7 +31,8 @@ class ProgressTracker:
                 dynamic_ncols=True,
             )
         except ImportError:
-            self.write(f"{self.description}: 0/{self.total}")
+            self._fallback_active = True
+            self._render_fallback(self.description)
 
     def update(self, step: str, advance: int = 1) -> None:
         self.current += advance
@@ -37,7 +40,7 @@ class ProgressTracker:
             self._bar.set_description_str(step)
             self._bar.update(advance)
         else:
-            self.write(f"{step}: {min(self.current, self.total)}/{self.total}")
+            self._render_fallback(step)
 
     def child(self, total: int, description: str, leave: bool = False) -> ProgressTracker:
         return ProgressTracker(
@@ -53,11 +56,31 @@ class ProgressTracker:
         if self._tqdm is not None:
             self._tqdm.write(text)
         else:
+            if self._fallback_active:
+                sys.stderr.write("\n")
+                sys.stderr.flush()
             print(text, flush=True)
+            if self._fallback_active and self.current < self.total:
+                self._render_fallback(self.description)
 
     def close(self) -> None:
         if self._bar is not None:
             self._bar.close()
+        elif self._fallback_active:
+            sys.stderr.write("\n")
+            sys.stderr.flush()
+            self._fallback_active = False
+
+    def _render_fallback(self, step: str) -> None:
+        total = max(self.total, 1)
+        current = min(self.current, self.total)
+        ratio = current / total
+        width = 24
+        filled = int(width * ratio)
+        bar = "#" * filled + "-" * (width - filled)
+        percent = int(ratio * 100)
+        sys.stderr.write(f"\r{step}: {percent:3d}%|{bar}| {current}/{self.total}")
+        sys.stderr.flush()
 
 
 class NullProgress:
