@@ -3,7 +3,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 
 class PlaceholderError(RuntimeError):
@@ -16,6 +16,7 @@ def create_placeholder_clips(
     limit: int | None = None,
     duration_override: float | None = None,
     ffmpeg_path: str | None = None,
+    progress: ProgressCallback | None = None,
 ) -> dict[str, Any]:
     ffmpeg = ffmpeg_path or shutil.which("ffmpeg")
     if not ffmpeg:
@@ -26,11 +27,14 @@ def create_placeholder_clips(
         jobs = jobs[:limit]
 
     created = []
-    for job in jobs:
+    total_jobs = len(jobs)
+    for index, job in enumerate(jobs, start=1):
         output_path = _resolve_media_path(media_root, job["output_path"])
         output_path.parent.mkdir(parents=True, exist_ok=True)
         duration = float(duration_override or job.get("duration_seconds") or 8)
         label = f"{job.get('episode_id', 'episode')} clip {job.get('episode_clip_index', '?')}"
+        if progress:
+            progress(str(output_path), index, total_jobs)
         command = _placeholder_command(ffmpeg, output_path, duration, label)
         _run(command)
         created.append(
@@ -84,4 +88,4 @@ def _run(command: list[str]) -> None:
     if result.returncode != 0:
         stderr = result.stderr.strip()
         raise PlaceholderError(f"ffmpeg failed with exit code {result.returncode}: {stderr}")
-
+ProgressCallback = Callable[[str, int | None, int | None], None]

@@ -65,9 +65,10 @@ def _document_json(datalab_result: dict[str, Any]) -> dict[str, Any]:
 
 
 def _normalize_pages(document_json: dict[str, Any], datalab_result: dict[str, Any]) -> list[dict[str, Any]]:
-    raw_pages = document_json.get("pages")
-    if not isinstance(raw_pages, list):
-        raw_pages = _pages_from_markdown(datalab_result.get("markdown", ""))
+    raw_pages = _json_pages(document_json)
+    if not raw_pages:
+        markdown = datalab_result.get("markdown")
+        raw_pages = _pages_from_markdown(markdown if isinstance(markdown, str) else "")
 
     pages: list[dict[str, Any]] = []
     for index, raw_page in enumerate(raw_pages):
@@ -86,6 +87,22 @@ def _normalize_pages(document_json: dict[str, Any], datalab_result: dict[str, An
             }
         )
     return pages
+
+
+def _json_pages(document_json: dict[str, Any]) -> list[Any]:
+    raw_pages = document_json.get("pages")
+    if isinstance(raw_pages, list):
+        return raw_pages
+
+    children = document_json.get("children")
+    if not isinstance(children, list):
+        return []
+    page_children = [
+        child
+        for child in children
+        if isinstance(child, dict) and str(child.get("block_type") or child.get("type") or "").lower() == "page"
+    ]
+    return page_children or children
 
 
 def _save_images(datalab_result: dict[str, Any], assets_dir: Path) -> list[dict[str, Any]]:
@@ -156,6 +173,10 @@ def _page_number(raw_page: dict[str, Any], index: int) -> int:
             return value + 1 if key in {"page_id", "page_idx"} and value == index else value
         if isinstance(value, str) and value.isdigit():
             return int(value)
+        if key == "id" and isinstance(value, str):
+            match = re.search(r"/page/(\d+)(?:/|$)", value)
+            if match:
+                return int(match.group(1)) + 1
     return index + 1
 
 
@@ -175,7 +196,10 @@ def _collect_text(value: Any) -> str:
 
 def _walk_text(value: Any, parts: list[str]) -> None:
     if isinstance(value, dict):
+        has_children = any(isinstance(value.get(key), list) and value.get(key) for key in CHILD_KEYS)
         for key in TEXT_KEYS:
+            if has_children and key in {"html", "markdown"}:
+                continue
             text = value.get(key)
             if isinstance(text, str):
                 parts.append(_strip_markup(text))
@@ -249,4 +273,3 @@ def _clean_text(text: str) -> str:
 def _slug(value: str) -> str:
     slug = re.sub(r"[^a-zA-Z0-9]+", "_", value.lower()).strip("_")
     return slug or "chapter"
-

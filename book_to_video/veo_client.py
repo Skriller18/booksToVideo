@@ -37,6 +37,7 @@ def generate_veo_clips_from_manifest(
     options: VeoGenerationOptions,
     persist_manifest: Callable[[dict[str, Any]], None] | None = None,
     client: Any | None = None,
+    progress: ProgressCallback | None = None,
 ) -> dict[str, Any]:
     """Generate pending Veo clips and update the manifest in place.
 
@@ -58,11 +59,13 @@ def generate_veo_clips_from_manifest(
     previous_last_frame: Path | None = None
     previous_scope_key: str | None = None
 
-    for job in jobs:
+    total_jobs = len(jobs)
+    for job_index, job in enumerate(jobs, start=1):
         if not isinstance(job, dict):
             continue
 
         output_path = _resolve_output_path(media_root, job)
+        job_label = job.get("job_id") or f"job {job_index}"
         scope_key = _continuity_scope_key(job, options)
         if scope_key != previous_scope_key:
             previous_last_frame = None
@@ -74,6 +77,8 @@ def generate_veo_clips_from_manifest(
         should_skip, skip_reason = _should_skip_job(job, output_path, options)
         if should_skip:
             skipped_count += 1
+            if progress:
+                progress(f"skipped {job_label}: {skip_reason}", job_index, total_jobs)
             if output_path.exists():
                 job["status"] = "completed"
                 job["local_output_path"] = str(output_path)
@@ -85,12 +90,16 @@ def generate_veo_clips_from_manifest(
 
         if options.limit is not None and generated_count >= options.limit:
             skipped_count += 1
+            if progress:
+                progress(f"skipped {job_label}: limit reached", job_index, total_jobs)
             result_jobs.append(_job_result(job, output_path, "skipped", "limit reached"))
             if persist_manifest:
                 persist_manifest(veo_manifest)
             continue
 
         try:
+            if progress:
+                progress(f"submitting {job_label}", job_index, total_jobs)
             job["status"] = "running"
             job["veo_model"] = options.model
             job["started_at"] = _now_epoch()
@@ -99,7 +108,11 @@ def generate_veo_clips_from_manifest(
 
             operation = _submit_video_generation(generator, job, options, start_frame_path)
             job["operation_name"] = getattr(operation, "name", None) or job.get("operation_name")
+            if progress:
+                progress(f"polling {job_label}", job_index, total_jobs)
             operation = _poll_operation(generator, operation, options)
+            if progress:
+                progress(f"saving {job_label}", job_index, total_jobs)
             _save_generated_video(generator, operation, output_path)
             previous_last_frame = _ensure_last_frame(job, output_path, media_root, options)
 
@@ -109,11 +122,15 @@ def generate_veo_clips_from_manifest(
             job.pop("error", None)
             generated_count += 1
             result_jobs.append(_job_result(job, output_path, "completed", "generated"))
+            if progress:
+                progress(f"completed {job_label}", job_index, total_jobs)
         except Exception as exc:
             job["status"] = "failed"
             job["error"] = str(exc)
             failed_count += 1
             result_jobs.append(_job_result(job, output_path, "failed", str(exc)))
+            if progress:
+                progress(f"failed {job_label}: {exc}", job_index, total_jobs)
         finally:
             if persist_manifest:
                 persist_manifest(veo_manifest)
@@ -343,3 +360,4 @@ def _job_result(job: dict[str, Any], output_path: Path, action: str, detail: str
 
 def _now_epoch() -> int:
     return int(time.time())
+ProgressCallback = Callable[[str, int | None, int | None], None]

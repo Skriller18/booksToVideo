@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import os
+from datetime import datetime
 from pathlib import Path
 
 from .datalab_client import DatalabConvertClient, DatalabConvertOptions
@@ -173,8 +174,10 @@ def main() -> None:
     if args.command == "run":
         output_dir = Path(args.output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
+        _log(f"Starting pipeline; output directory: {output_dir}")
 
         if args.raw_json:
+            _log(f"Reading saved Datalab response: {args.raw_json}")
             datalab_result = read_json(Path(args.raw_json))
             source_pdf = args.pdf or datalab_result.get("source_pdf") or "unknown.pdf"
         else:
@@ -197,10 +200,13 @@ def main() -> None:
                 options=datalab_options,
                 poll_interval_seconds=args.poll_interval,
                 max_polls=args.max_polls,
+                progress=_log,
             )
             source_pdf = args.pdf
             write_json(output_dir / "raw_datalab_convert.json", datalab_result)
+            _log(f"Wrote raw Datalab response: {output_dir / 'raw_datalab_convert.json'}")
 
+        _log("Normalizing Datalab response into chapter extraction")
         chapter = normalize_datalab_convert_result(
             datalab_result=datalab_result,
             source_pdf=source_pdf,
@@ -209,7 +215,12 @@ def main() -> None:
             chapter_title=args.chapter_title,
         )
         write_json(output_dir / "chapter_extraction.json", chapter)
+        _log(
+            "Wrote chapter extraction: "
+            f"{len(chapter['pages'])} pages, {len(chapter['topics'])} topics"
+        )
 
+        _log("Building episode plan, storyboard, Veo manifest, and stitch manifest")
         artifacts = build_planning_artifacts(
             chapter,
             target_episode_count=args.episode_count,
@@ -220,15 +231,24 @@ def main() -> None:
         write_json(output_dir / "storyboard.json", artifacts["storyboard"])
         write_json(output_dir / "veo_manifest.json", artifacts["veo_manifest"])
         write_json(output_dir / "stitch_manifest.json", artifacts["stitch_manifest"])
+        _log(
+            "Wrote planning artifacts: "
+            f"{artifacts['episode_plan']['episode_count']} episodes, "
+            f"{artifacts['storyboard']['clip_count']} clips"
+        )
 
         if args.mock_clips:
+            _log("Creating placeholder clips")
             clip_result = create_placeholder_clips(
                 veo_manifest=artifacts["veo_manifest"],
                 media_root=output_dir,
                 duration_override=args.mock_duration,
+                progress=_log,
             )
             write_json(output_dir / "mock_clips_result.json", clip_result)
+            _log(f"Wrote mock clip result: {clip_result['created_clip_count']} clips")
         else:
+            _log("Generating Veo clips")
             veo_options = VeoGenerationOptions(
                 model=args.veo_model,
                 aspect_ratio=args.aspect_ratio,
@@ -246,9 +266,17 @@ def main() -> None:
                 media_root=output_dir,
                 options=veo_options,
                 persist_manifest=lambda payload: write_json(output_dir / "veo_manifest.json", payload),
+                progress=_log,
             )
             write_json(output_dir / "veo_generation_result.json", clip_result)
+            _log(
+                "Wrote Veo generation result: "
+                f"{clip_result['generated_clip_count']} generated, "
+                f"{clip_result['skipped_clip_count']} skipped, "
+                f"{clip_result['failed_clip_count']} failed"
+            )
 
+        _log("Stitching episode and chapter videos")
         stitch_manifest = read_json(output_dir / "stitch_manifest.json")
         stitch_result = stitch_from_manifest(
             stitch_manifest=stitch_manifest,
@@ -258,11 +286,13 @@ def main() -> None:
             copy_codecs=args.copy_codecs,
         )
         write_json(output_dir / "stitch_result.json", stitch_result)
-        print(f"Completed pipeline; wrote artifacts and videos under {output_dir}")
+        _log(f"Completed pipeline; wrote artifacts and videos under {output_dir}")
     elif args.command == "plan":
         chapter_path = Path(args.chapter_json)
         output_dir = Path(args.output_dir)
+        _log(f"Reading chapter extraction: {chapter_path}")
         chapter = read_json(chapter_path)
+        _log("Building planning artifacts")
         artifacts = build_planning_artifacts(
             chapter,
             target_episode_count=args.episode_count,
@@ -276,12 +306,18 @@ def main() -> None:
         write_json(output_dir / "veo_manifest.json", artifacts["veo_manifest"])
         write_json(output_dir / "stitch_manifest.json", artifacts["stitch_manifest"])
 
-        print(f"Wrote planning artifacts to {output_dir}")
+        _log(
+            f"Wrote planning artifacts to {output_dir}: "
+            f"{artifacts['episode_plan']['episode_count']} episodes, "
+            f"{artifacts['storyboard']['clip_count']} clips"
+        )
     elif args.command == "extract-datalab":
         output_dir = Path(args.output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
+        _log(f"Starting Datalab extraction; output directory: {output_dir}")
 
         if args.raw_json:
+            _log(f"Reading saved Datalab response: {args.raw_json}")
             datalab_result = read_json(Path(args.raw_json))
             source_pdf = args.pdf or datalab_result.get("source_pdf") or "unknown.pdf"
         else:
@@ -304,10 +340,13 @@ def main() -> None:
                 options=options,
                 poll_interval_seconds=args.poll_interval,
                 max_polls=args.max_polls,
+                progress=_log,
             )
             source_pdf = args.pdf
             write_json(output_dir / "raw_datalab_convert.json", datalab_result)
+            _log(f"Wrote raw Datalab response: {output_dir / 'raw_datalab_convert.json'}")
 
+        _log("Normalizing Datalab response into chapter extraction")
         chapter = normalize_datalab_convert_result(
             datalab_result=datalab_result,
             source_pdf=source_pdf,
@@ -316,13 +355,18 @@ def main() -> None:
             chapter_title=args.chapter_title,
         )
         write_json(output_dir / "chapter_extraction.json", chapter)
-        print(f"Wrote Datalab chapter extraction to {output_dir / 'chapter_extraction.json'}")
+        _log(
+            f"Wrote Datalab chapter extraction to {output_dir / 'chapter_extraction.json'}: "
+            f"{len(chapter['pages'])} pages, {len(chapter['topics'])} topics"
+        )
     elif args.command == "stitch":
         manifest_path = Path(args.stitch_manifest)
+        _log(f"Reading stitch manifest: {manifest_path}")
         stitch_manifest = read_json(manifest_path)
         media_root = Path(args.media_root) if args.media_root else manifest_path.parent
         output_dir = Path(args.output_dir) if args.output_dir else manifest_path.parent
 
+        _log("Running stitching" if not args.dry_run else "Planning stitching dry run")
         result = stitch_from_manifest(
             stitch_manifest=stitch_manifest,
             media_root=media_root,
@@ -333,21 +377,25 @@ def main() -> None:
         )
         write_json(output_dir / "stitch_result.json", result)
         action = "Planned" if args.dry_run else "Completed"
-        print(f"{action} stitching; wrote {output_dir / 'stitch_result.json'}")
+        _log(f"{action} stitching; wrote {output_dir / 'stitch_result.json'}")
     elif args.command == "mock-clips":
         manifest_path = Path(args.veo_manifest)
+        _log(f"Reading Veo manifest: {manifest_path}")
         veo_manifest = read_json(manifest_path)
         media_root = Path(args.media_root) if args.media_root else manifest_path.parent
+        _log("Creating placeholder clips")
         result = create_placeholder_clips(
             veo_manifest=veo_manifest,
             media_root=media_root,
             limit=args.limit,
             duration_override=args.duration,
+            progress=_log,
         )
         write_json(media_root / "mock_clips_result.json", result)
-        print(f"Created {result['created_clip_count']} placeholder clips under {media_root}")
+        _log(f"Created {result['created_clip_count']} placeholder clips under {media_root}")
     elif args.command == "generate-veo":
         manifest_path = Path(args.veo_manifest)
+        _log(f"Reading Veo manifest: {manifest_path}")
         veo_manifest = read_json(manifest_path)
         media_root = Path(args.media_root) if args.media_root else manifest_path.parent
         options = VeoGenerationOptions(
@@ -363,18 +411,25 @@ def main() -> None:
             continuity_scope=args.continuity_scope,
         )
 
+        _log("Generating Veo clips")
         result = generate_veo_clips_from_manifest(
             veo_manifest=veo_manifest,
             media_root=media_root,
             options=options,
             persist_manifest=lambda payload: write_json(manifest_path, payload),
+            progress=_log,
         )
         write_json(media_root / "veo_generation_result.json", result)
-        print(
+        _log(
             "Generated "
             f"{result['generated_clip_count']} clips, skipped {result['skipped_clip_count']}, "
             f"failed {result['failed_clip_count']}; wrote {media_root / 'veo_generation_result.json'}"
         )
+
+
+def _log(message: str) -> None:
+    timestamp = datetime.now().strftime("%H:%M:%S")
+    print(f"[{timestamp}] {message}", flush=True)
 
 def load_env_file(path: Path, override: bool = False) -> dict[str, str]:
     if not path.exists():

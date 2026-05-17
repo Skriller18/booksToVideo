@@ -6,7 +6,7 @@ import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from urllib import error, request
 
 
@@ -55,12 +55,23 @@ class DatalabConvertClient:
         options: DatalabConvertOptions,
         poll_interval_seconds: int = 2,
         max_polls: int = 300,
+        progress: ProgressCallback | None = None,
     ) -> dict[str, Any]:
+        if progress:
+            progress(f"Submitting {pdf_path.name} to Datalab Convert", None, None)
         submit_result = self.submit_convert(pdf_path, options)
         check_url = submit_result.get("request_check_url")
         if not check_url:
             raise DatalabClientError(f"Datalab response did not include request_check_url: {submit_result}")
-        return self.poll(check_url, poll_interval_seconds=poll_interval_seconds, max_polls=max_polls)
+        if progress:
+            request_id = submit_result.get("request_id", "unknown")
+            progress(f"Datalab accepted request {request_id}; polling for completion", None, None)
+        return self.poll(
+            check_url,
+            poll_interval_seconds=poll_interval_seconds,
+            max_polls=max_polls,
+            progress=progress,
+        )
 
     def submit_convert(self, pdf_path: Path, options: DatalabConvertOptions) -> dict[str, Any]:
         if not pdf_path.exists():
@@ -102,6 +113,7 @@ class DatalabConvertClient:
         check_url: str,
         poll_interval_seconds: int,
         max_polls: int,
+        progress: ProgressCallback | None = None,
     ) -> dict[str, Any]:
         req = request.Request(
             check_url,
@@ -113,9 +125,11 @@ class DatalabConvertClient:
             },
         )
         last_result: dict[str, Any] = {}
-        for _ in range(max_polls):
+        for poll_index in range(1, max_polls + 1):
             last_result = _read_json_response(req, timeout=self.timeout_seconds)
             status = last_result.get("status")
+            if progress:
+                progress(f"status={status or 'unknown'}", poll_index, max_polls)
             if status == "complete":
                 if not last_result.get("success", True):
                     raise DatalabClientError(last_result.get("error") or "Datalab conversion failed")
@@ -181,3 +195,4 @@ def _read_json_response(req: request.Request, timeout: int) -> dict[str, Any]:
 
 def _bool(value: bool) -> str:
     return "true" if value else "false"
+ProgressCallback = Callable[[str, int | None, int | None], None]
