@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from .models import ClipBeat
 
 
@@ -19,7 +21,39 @@ VOICE_PROFILE = (
 )
 
 
+def sanitize_veo_text(text: str) -> str:
+    sanitized = " ".join(text.split())
+    sanitized = re.sub(
+        r"\bSpeaker icon indicating audio content\.\s*",
+        "",
+        sanitized,
+        flags=re.IGNORECASE,
+    )
+    sanitized = re.sub(
+        r"\bLetter [A-Z] icon indicating audio content\.\s*",
+        "",
+        sanitized,
+        flags=re.IGNORECASE,
+    )
+    sanitized = re.sub(
+        r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})\s+is\s+one\s+of\b",
+        "The author is one of",
+        sanitized,
+    )
+    sanitized = re.sub(
+        r"\bby\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})\b",
+        "by the author",
+        sanitized,
+        flags=re.IGNORECASE,
+    )
+    # Known textbook author names should not be sent to video generation models;
+    # some providers reject real-person names even when the content is educational.
+    sanitized = re.sub(r"\bRuskin\s+Bond\b", "the author", sanitized, flags=re.IGNORECASE)
+    return sanitized
+
+
 def build_audio_direction(spoken_line: str) -> str:
+    spoken_line = sanitize_veo_text(spoken_line)
     return (
         f"Native audio: spoken line exactly: \"{spoken_line}\" "
         f"Voice profile: {VOICE_PROFILE}. "
@@ -32,11 +66,15 @@ def build_veo_prompt(clip: ClipBeat) -> str:
     if not clip.reference_illustrations:
         reference_note = "matching the chapter's simple textbook illustration style"
 
+    visual_beat = sanitize_veo_text(clip.visual_beat)
+    narration = sanitize_veo_text(clip.narration)
+    audio_direction = sanitize_veo_text(clip.audio_direction)
+
     return (
-        f"Medium educational animated shot, {clip.visual_beat}. "
+        f"Medium educational animated shot, {visual_beat}. "
         f"{reference_note}. "
-        f"Context: {clip.narration} "
+        f"Context: {narration} "
         f"Style and ambience: {SERIES_STYLE}. "
         "Camera: slow gentle push-in or pan, stable composition, one focused visual action. "
-        f"{clip.audio_direction}"
+        f"{audio_direction}"
     )
