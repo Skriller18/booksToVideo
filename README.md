@@ -2,7 +2,7 @@
 
 Pipeline MVP for turning a textbook chapter into a sequence of short learning videos.
 
-The MVP focuses on the planning layer before expensive generation:
+The MVP keeps every step traceable from extraction through generation:
 
 ```text
 Datalab Convert API
@@ -10,7 +10,10 @@ Datalab Convert API
   -> episode_plan.json
   -> storyboard.json
   -> veo_manifest.json
+  -> generated clips
   -> stitch_manifest.json
+  -> episode videos
+  -> full chapter video
 ```
 
 ## Why This Shape
@@ -25,6 +28,12 @@ A chapter is treated as a micro-drama series:
 This keeps educational coverage, prompt generation, video generation, and stitching traceable.
 
 ## Quick Start
+
+Install the optional provider SDK used for real Veo generation:
+
+```bash
+python3 -m pip install -r requirements.txt
+```
 
 Extract a chapter PDF through Datalab:
 
@@ -41,6 +50,30 @@ This writes:
 - `runs/chapter_ocr/raw_datalab_convert.json`
 - `runs/chapter_ocr/chapter_extraction.json`
 - extracted illustration assets under `runs/chapter_ocr/assets/`
+
+Run the full real pipeline from PDF to final chapter video:
+
+```bash
+export DATALAB_API_KEY="your_datalab_key"
+export VERTEX_API_KEY="your_gemini_or_vertex_api_key"
+
+python3 -m book_to_video.cli run \
+  --pdf path/to/chapter.pdf \
+  --output-dir runs/chapter_full \
+  --episode-count 20
+```
+
+For a local smoke test without spending Veo credits, run the same pipeline with placeholder clips:
+
+```bash
+python3 -m book_to_video.cli run \
+  --raw-json examples/datalab_convert.sample.json \
+  --output-dir runs/smoke_full \
+  --episode-count 1 \
+  --clips-per-episode 1 \
+  --mock-clips \
+  --mock-duration 0.2
+```
 
 Normalize a saved Datalab response without calling the API:
 
@@ -86,7 +119,23 @@ python3 -m book_to_video.cli mock-clips \
   --media-root runs/sample_20
 ```
 
-After Veo clips have been generated into `runs/sample_20/clips/`, stitch episodes and the full chapter video:
+Generate real Veo clips through the Gemini API:
+
+```bash
+export GEMINI_API_KEY="your_key"
+
+python3 -m book_to_video.cli generate-veo \
+  --veo-manifest runs/sample_20/veo_manifest.json \
+  --media-root runs/sample_20 \
+  --limit 1
+```
+
+`generate-veo` accepts `VERTEX_API_KEY`, `GEMINI_API_KEY`, or `GOOGLE_API_KEY`.
+Continuity is enabled by default: after each generated clip, the worker extracts its last frame into `continuity/` and sends that image as the starting frame for the next clip in the same episode. Use `--no-continuity` to disable this, or `--continuity-scope chapter` to carry continuity across episode boundaries.
+
+Remove `--limit 1` when you are ready to generate every pending clip. The command updates `veo_manifest.json` after each clip, so it can be rerun to continue a partially completed chapter.
+
+After Veo clips exist in `runs/sample_20/clips/`, stitch episodes and the full chapter video:
 
 ```bash
 python3 -m book_to_video.cli stitch \
@@ -127,6 +176,9 @@ Implemented:
 - 15-clip storyboard generation per episode
 - Veo prompt manifest generation
 - native Veo audio instructions per clip
+- Gemini API Veo clip generation from `veo_manifest.json`
+- resumable Veo manifest status updates
+- previous-clip last-frame continuity for Veo generation
 - stitch manifest generation
 - ffmpeg-based episode and chapter stitching from manifests
 - local placeholder clip generation for stitch testing before Veo is connected
@@ -135,6 +187,5 @@ Stubbed boundaries:
 
 - illustration cropping
 - LLM-based segmentation/refinement
-- Veo API calls
 
-Datalab OCR/layout extraction is the first implemented provider boundary. The remaining pieces are intentionally separated so they can be added without changing the planning artifacts.
+Datalab OCR/layout extraction and Gemini API Veo generation are implemented provider boundaries. The remaining pieces are intentionally separated so they can be added without changing the planning artifacts.

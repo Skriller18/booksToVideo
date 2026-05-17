@@ -99,8 +99,26 @@ Important fields:
 - `reference_images`
 - `output_path`
 - `status`
+- `continuity.start_frame_path`
+- `continuity.last_frame_path`
+- `continuity.mode`
 
-This is the input for the future Veo worker.
+This is the input for the Veo worker:
+
+```bash
+export VERTEX_API_KEY="your_key"
+
+python3 -m book_to_video.cli generate-veo \
+  --veo-manifest runs/chapter_plan/veo_manifest.json \
+  --media-root runs/chapter_plan \
+  --limit 1
+```
+
+The Veo worker accepts `VERTEX_API_KEY`, `GEMINI_API_KEY`, or `GOOGLE_API_KEY`.
+
+The command writes generated clips to each job's `output_path`, updates `status`, `operation_name`, `local_output_path`, and `continuity` in `veo_manifest.json`, and writes `veo_generation_result.json`. Use `--limit 1` for a cost-controlled smoke test, then remove it to generate all pending clips.
+
+Continuity is enabled by default. After a clip is generated, the worker extracts its last frame with `ffmpeg`, saves it under `continuity/`, and sends it as the starting image for the next clip in the same episode. Use `--no-continuity` to disable this. Use `--continuity-scope chapter` only when the entire chapter should behave like one continuous visual scene.
 
 The MVP assumes Veo-native audio. Each job repeats the shared voice profile so a batch of 200-300 clips keeps the same Indian classroom teacher tone as consistently as possible.
 
