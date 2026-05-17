@@ -7,6 +7,7 @@ The MVP keeps every step traceable from extraction through generation:
 ```text
 Datalab Convert API
   -> chapter_extraction.json
+  -> LLM-orchestrator compatible episode script
   -> episode_plan.json
   -> storyboard.json
   -> veo_manifest.json
@@ -24,6 +25,7 @@ A chapter is treated as a micro-drama series:
 - Each topic episode targets about 2 minutes.
 - Each 2-minute episode is made from 15 Veo clips.
 - Each Veo clip is a focused 8-second visual beat.
+- The orchestration layer decides the episode flow, narration, clip beats, and when a textbook illustration is meaningful enough to send to Veo.
 
 This keeps educational coverage, prompt generation, video generation, and stitching traceable.
 
@@ -108,6 +110,12 @@ python3 -m book_to_video.cli plan \
   --chapter-json examples/chapter_extraction.sample.json \
   --output-dir runs/sample
 ```
+
+Planning uses `--orchestrator auto` by default. With `VERTEX_API_KEY`,
+`GEMINI_API_KEY`, or `GOOGLE_API_KEY` available, it asks Gemini to script the
+episode flow; otherwise it uses the deterministic local microdrama fallback.
+Use `--orchestrator local` for repeatable offline planning, or
+`--orchestrator gemini` to require the LLM path.
 
 Run a 20-episode chapter plan, which produces 300 pending Veo clip jobs:
 
@@ -208,7 +216,10 @@ Implemented:
 
 - JSON schemas as dataclasses
 - rule-based episode segmentation
-- 15-clip storyboard generation per episode
+- LLM-orchestrator compatible microdrama scripting with deterministic local fallback
+- 15-clip storyboard generation per episode without numbered step narration
+- selective textbook illustration references so Veo only receives images when they clarify the beat
+- asset filtering for publisher logos, QR/barcodes, icons, decorative images, and other non-lesson assets
 - Veo prompt manifest generation
 - native Veo audio instructions per clip
 - Gemini API Veo clip generation from `veo_manifest.json`
@@ -221,6 +232,6 @@ Implemented:
 Stubbed boundaries:
 
 - illustration cropping
-- LLM-based segmentation/refinement
+- live LLM-based segmentation/refinement
 
 Datalab OCR/layout extraction and Gemini API Veo generation are implemented provider boundaries. The remaining pieces are intentionally separated so they can be added without changing the planning artifacts.

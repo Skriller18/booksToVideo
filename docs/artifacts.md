@@ -27,6 +27,15 @@ Each illustration should include:
 - `path`
 - `caption`
 - `page_number`
+- `asset_type`
+- `is_lesson_asset`
+- `rejection_reason`
+
+The extraction layer classifies image assets before topic planning. Publisher
+logos, QR codes, barcodes, audio icons, decorative marks, and other unrelated
+assets are not attached to topics as lesson illustrations. The files may still
+exist under `assets/` for traceability, but they should not appear in
+storyboard `reference_illustrations` or Veo `reference_images`.
 
 Future OCR adapters should also add bounding boxes, OCR confidence, page image paths, and crop coordinates.
 
@@ -80,8 +89,16 @@ Important fields:
 - `veo_prompt`
 - `negative_prompt`
 - `reference_illustrations`
+- `metadata.orchestrator`
+- `metadata.illustration_policy`
 
 This file should be editable by a curriculum/content reviewer before generation. `narration` is the intended native Veo spoken line, not a separate TTS script.
+
+The storyboard is produced through an orchestrator contract that decides the
+microdrama flow, what the teacher voice says, and whether an illustration should
+be used. Clips that do not need a source illustration keep
+`reference_illustrations` empty so Veo is guided by continuity and the prompt
+instead of unrelated page images.
 
 ## `veo_manifest.json`
 
