@@ -8,6 +8,7 @@ from unittest import mock
 from book_to_video.cli import _incomplete_veo_job_ids, load_env_file
 from book_to_video.datalab_extractor import normalize_datalab_convert_result
 from book_to_video.pipeline import build_planning_artifacts
+from book_to_video.prompts import build_audio_direction, sanitize_veo_text
 from book_to_video.stitcher import stitch_from_manifest
 from book_to_video.veo_client import VeoGenerationOptions, generate_veo_clips_from_manifest
 
@@ -33,6 +34,20 @@ class PipelineTest(unittest.TestCase):
         self.assertEqual(first_job["audio"]["mode"], "native")
         self.assertIn("Indian English teacher voice", first_job["audio"]["voice_profile"])
         self.assertIn("Native audio", first_job["prompt"])
+
+    def test_veo_text_sanitizer_removes_real_person_author_reference(self) -> None:
+        text = (
+            "Step 4: The Boy Who Broke the Bank Speaker icon indicating audio content. "
+            "Letter A icon indicating audio content. Ruskin Bond is one of India's most loved writers."
+        )
+
+        sanitized = sanitize_veo_text(text)
+        audio_direction = build_audio_direction(text)
+
+        self.assertNotIn("Ruskin Bond", sanitized)
+        self.assertNotIn("Ruskin Bond", audio_direction)
+        self.assertNotIn("Speaker icon", sanitized)
+        self.assertIn("The author is one of", sanitized)
 
     def test_target_episode_count_expands_to_300_clips(self) -> None:
         chapter = _load_sample()
@@ -172,6 +187,36 @@ class PipelineTest(unittest.TestCase):
             self.assertTrue((Path(tmp) / "clips/clip_0001.mp4").exists())
             self.assertIn("running", persisted_statuses)
             self.assertIn("completed", persisted_statuses)
+
+    def test_veo_generation_sanitizes_existing_manifest_before_submit(self) -> None:
+        manifest = {
+            "jobs": [
+                {
+                    "job_id": "veo_0001",
+                    "duration_seconds": 8,
+                    "prompt": "Context: Ruskin Bond is one of India's most loved writers.",
+                    "audio": {
+                        "spoken_line": "Step 1: Ruskin Bond is one of India's most loved writers.",
+                    },
+                    "output_path": "clips/clip_0001.mp4",
+                    "status": "pending",
+                }
+            ]
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            fake_client = FakeVeoClient()
+            result = generate_veo_clips_from_manifest(
+                veo_manifest=manifest,
+                media_root=Path(tmp),
+                options=VeoGenerationOptions(poll_interval_seconds=0, max_polls=1, continuity_enabled=False),
+                client=fake_client,
+            )
+
+            self.assertEqual(result["generated_clip_count"], 1)
+            self.assertNotIn("Ruskin Bond", fake_client.submitted_prompts[0])
+            self.assertNotIn("Ruskin Bond", manifest["jobs"][0]["prompt"])
+            self.assertNotIn("Ruskin Bond", manifest["jobs"][0]["audio"]["spoken_line"])
 
     def test_veo_generation_skips_existing_completed_clip(self) -> None:
         manifest = {
@@ -324,6 +369,40 @@ class PipelineTest(unittest.TestCase):
             self.assertEqual(manifest["jobs"][0]["status"], "failed")
             self.assertEqual(manifest["jobs"][1]["status"], "completed")
 
+    def test_veo_generation_writes_diagnostics_when_operation_has_no_videos(self) -> None:
+        manifest = {
+            "jobs": [
+                {
+                    "job_id": "veo_0001",
+                    "duration_seconds": 8,
+                    "prompt": "This response will have no videos.",
+                    "output_path": "clips/clip_0001.mp4",
+                    "status": "pending",
+                }
+            ]
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            result = generate_veo_clips_from_manifest(
+                veo_manifest=manifest,
+                media_root=root,
+                options=VeoGenerationOptions(
+                    poll_interval_seconds=0,
+                    max_polls=1,
+                    continuity_enabled=False,
+                ),
+                client=FakeVeoClientWithoutGeneratedVideos(),
+            )
+
+            diagnostics_path = root / "veo_diagnostics" / "veo_0001_operation.json"
+            diagnostics = json.loads(diagnostics_path.read_text(encoding="utf-8"))
+            self.assertEqual(result["failed_clip_count"], 1)
+            self.assertTrue(diagnostics_path.exists())
+            self.assertEqual(diagnostics["job"]["job_id"], "veo_0001")
+            self.assertEqual(diagnostics["operation"]["done"], True)
+            self.assertIn("diagnostics", manifest["jobs"][0]["error"])
+
     def test_veo_generation_uses_previous_last_frame_for_continuity(self) -> None:
         manifest = {
             "jobs": [
@@ -440,6 +519,7 @@ class FakeVeoClient:
     def __init__(self) -> None:
         self.submitted_count = 0
         self.submitted_job_ids = []
+        self.submitted_prompts = []
         self.start_frames = []
 
     def submit_video_generation(
@@ -450,6 +530,7 @@ class FakeVeoClient:
     ) -> dict:
         self.submitted_count += 1
         self.submitted_job_ids.append(job["job_id"])
+        self.submitted_prompts.append(job["prompt"])
         if start_frame_path:
             self.start_frames.append(start_frame_path)
         return {"job_id": job["job_id"]}
@@ -460,6 +541,31 @@ class FakeVeoClient:
     def save_generated_video(self, operation: dict, output_path: Path) -> None:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_bytes(b"generated-video")
+
+
+class FakeVeoClientWithoutGeneratedVideos:
+    def submit_video_generation(
+        self,
+        job: dict,
+        options: VeoGenerationOptions,
+        start_frame_path: Path | None = None,
+    ) -> object:
+        return FakeOperation(name=f"operations/{job['job_id']}")
+
+    def poll_video_generation(self, operation: object, options: VeoGenerationOptions) -> object:
+        return operation
+
+
+class FakeOperation:
+    def __init__(self, name: str) -> None:
+        self.name = name
+        self.done = True
+        self.response = FakeOperationResponse()
+
+
+class FakeOperationResponse:
+    def __init__(self) -> None:
+        self.generated_videos = []
 
 
 if __name__ == "__main__":
