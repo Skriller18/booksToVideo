@@ -78,6 +78,8 @@ python3 -m book_to_video.cli run \
   --episode-count 20
 ```
 
+Before stitching, `run` checks that every Veo clip exists on disk. Missing or failed clips are retried once by default; use `--veo-retry-missing-attempts N` to change that, or `--veo-retry-missing-attempts 0` to only check and fail before stitching.
+
 For a local smoke test without spending Veo credits, run the same pipeline with placeholder clips:
 
 ```bash
@@ -149,6 +151,24 @@ python3 -m book_to_video.cli generate-veo \
 Continuity is enabled by default: after each generated clip, the worker extracts its last frame into `continuity/` and sends that image as the starting frame for the next clip in the same episode. Use `--no-continuity` to disable this, or `--continuity-scope chapter` to carry continuity across episode boundaries.
 
 Remove `--limit 1` when you are ready to generate every pending clip. The command updates `veo_manifest.json` after each clip, so it can be rerun to continue a partially completed chapter.
+
+Retry only failed Veo clips after a partial run:
+
+```bash
+python3 -m book_to_video.cli generate-veo \
+  --veo-manifest runs/sample_20/veo_manifest.json \
+  --media-root runs/sample_20 \
+  --failed-only
+```
+
+Retry one specific failed clip:
+
+```bash
+python3 -m book_to_video.cli generate-veo \
+  --veo-manifest runs/sample_20/veo_manifest.json \
+  --media-root runs/sample_20 \
+  --job-id veo_0006
+```
 
 After Veo clips exist in `runs/sample_20/clips/`, stitch episodes and the full chapter video:
 

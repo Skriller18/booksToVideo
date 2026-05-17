@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from book_to_video.cli import load_env_file
+from book_to_video.cli import _incomplete_veo_job_ids, load_env_file
 from book_to_video.datalab_extractor import normalize_datalab_convert_result
 from book_to_video.pipeline import build_planning_artifacts
 from book_to_video.stitcher import stitch_from_manifest
@@ -203,6 +203,127 @@ class PipelineTest(unittest.TestCase):
             self.assertEqual(result["skipped_clip_count"], 1)
             self.assertEqual(fake_client.submitted_count, 0)
 
+    def test_veo_generation_reruns_completed_job_when_output_missing(self) -> None:
+        manifest = {
+            "jobs": [
+                {
+                    "job_id": "veo_0001",
+                    "duration_seconds": 8,
+                    "prompt": "Completed in manifest but missing on disk.",
+                    "output_path": "clips/clip_0001.mp4",
+                    "status": "completed",
+                }
+            ]
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            fake_client = FakeVeoClient()
+            result = generate_veo_clips_from_manifest(
+                veo_manifest=manifest,
+                media_root=Path(tmp),
+                options=VeoGenerationOptions(poll_interval_seconds=0, max_polls=1, continuity_enabled=False),
+                client=fake_client,
+            )
+
+            self.assertEqual(result["generated_clip_count"], 1)
+            self.assertEqual(fake_client.submitted_job_ids, ["veo_0001"])
+            self.assertEqual(manifest["jobs"][0]["status"], "completed")
+            self.assertTrue((Path(tmp) / "clips/clip_0001.mp4").exists())
+
+    def test_veo_generation_failed_only_reruns_failed_jobs(self) -> None:
+        manifest = {
+            "jobs": [
+                {
+                    "job_id": "veo_0001",
+                    "duration_seconds": 8,
+                    "prompt": "Already done.",
+                    "output_path": "clips/clip_0001.mp4",
+                    "status": "completed",
+                },
+                {
+                    "job_id": "veo_0002",
+                    "duration_seconds": 8,
+                    "prompt": "Try this one again.",
+                    "output_path": "clips/clip_0002.mp4",
+                    "status": "failed",
+                    "error": "Veo operation completed without generated_videos",
+                },
+                {
+                    "job_id": "veo_0003",
+                    "duration_seconds": 8,
+                    "prompt": "Not ready yet.",
+                    "output_path": "clips/clip_0003.mp4",
+                    "status": "pending",
+                },
+            ]
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            completed_path = root / "clips/clip_0001.mp4"
+            completed_path.parent.mkdir(parents=True)
+            completed_path.write_bytes(b"existing-video")
+
+            fake_client = FakeVeoClient()
+            result = generate_veo_clips_from_manifest(
+                veo_manifest=manifest,
+                media_root=root,
+                options=VeoGenerationOptions(
+                    poll_interval_seconds=0,
+                    max_polls=1,
+                    continuity_enabled=False,
+                    failed_only=True,
+                ),
+                client=fake_client,
+            )
+
+            self.assertEqual(result["generated_clip_count"], 1)
+            self.assertEqual(result["skipped_clip_count"], 2)
+            self.assertEqual(fake_client.submitted_job_ids, ["veo_0002"])
+            self.assertEqual(manifest["jobs"][1]["status"], "completed")
+            self.assertNotIn("error", manifest["jobs"][1])
+            self.assertEqual(manifest["jobs"][2]["status"], "pending")
+
+    def test_veo_generation_job_id_runs_only_selected_job(self) -> None:
+        manifest = {
+            "jobs": [
+                {
+                    "job_id": "veo_0001",
+                    "duration_seconds": 8,
+                    "prompt": "Skip this failed job.",
+                    "output_path": "clips/clip_0001.mp4",
+                    "status": "failed",
+                },
+                {
+                    "job_id": "veo_0002",
+                    "duration_seconds": 8,
+                    "prompt": "Run only this failed job.",
+                    "output_path": "clips/clip_0002.mp4",
+                    "status": "failed",
+                },
+            ]
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            fake_client = FakeVeoClient()
+            result = generate_veo_clips_from_manifest(
+                veo_manifest=manifest,
+                media_root=Path(tmp),
+                options=VeoGenerationOptions(
+                    poll_interval_seconds=0,
+                    max_polls=1,
+                    continuity_enabled=False,
+                    job_ids=("veo_0002",),
+                ),
+                client=fake_client,
+            )
+
+            self.assertEqual(result["generated_clip_count"], 1)
+            self.assertEqual(result["skipped_clip_count"], 1)
+            self.assertEqual(fake_client.submitted_job_ids, ["veo_0002"])
+            self.assertEqual(manifest["jobs"][0]["status"], "failed")
+            self.assertEqual(manifest["jobs"][1]["status"], "completed")
+
     def test_veo_generation_uses_previous_last_frame_for_continuity(self) -> None:
         manifest = {
             "jobs": [
@@ -273,6 +394,38 @@ class PipelineTest(unittest.TestCase):
                 self.assertEqual(os.environ["GOOGLE_API_KEY"], "file_google")
                 self.assertNotIn("DATALAB_API_KEY", loaded)
 
+    def test_incomplete_veo_job_ids_reports_failed_and_missing_outputs(self) -> None:
+        manifest = {
+            "jobs": [
+                {
+                    "job_id": "veo_0001",
+                    "output_path": "clips/clip_0001.mp4",
+                    "status": "completed",
+                },
+                {
+                    "job_id": "veo_0002",
+                    "output_path": "clips/clip_0002.mp4",
+                    "status": "completed",
+                },
+                {
+                    "job_id": "veo_0003",
+                    "output_path": "clips/clip_0003.mp4",
+                    "status": "failed",
+                },
+            ]
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            output_path = root / "clips/clip_0001.mp4"
+            output_path.parent.mkdir(parents=True)
+            output_path.write_bytes(b"existing-video")
+
+            self.assertEqual(
+                _incomplete_veo_job_ids(manifest, root),
+                ["veo_0002", "veo_0003"],
+            )
+
 
 def _load_sample() -> dict:
     return _load_json("examples/chapter_extraction.sample.json")
@@ -286,6 +439,7 @@ def _load_json(relative_path: str) -> dict:
 class FakeVeoClient:
     def __init__(self) -> None:
         self.submitted_count = 0
+        self.submitted_job_ids = []
         self.start_frames = []
 
     def submit_video_generation(
@@ -295,6 +449,7 @@ class FakeVeoClient:
         start_frame_path: Path | None = None,
     ) -> dict:
         self.submitted_count += 1
+        self.submitted_job_ids.append(job["job_id"])
         if start_frame_path:
             self.start_frames.append(start_frame_path)
         return {"job_id": job["job_id"]}

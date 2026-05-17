@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import argparse
 import os
+from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 from .datalab_client import DatalabConvertClient, DatalabConvertOptions
 from .datalab_extractor import normalize_datalab_convert_result
@@ -46,6 +48,12 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--clip-duration", type=int, default=8, choices=(4, 6, 8))
     run.add_argument("--veo-model", default=DEFAULT_VEO_MODEL, help=f"Veo model id. Default: {DEFAULT_VEO_MODEL}.")
     run.add_argument("--veo-limit", type=int, default=None, help="Generate only the first N runnable clips.")
+    run.add_argument(
+        "--veo-retry-missing-attempts",
+        type=int,
+        default=1,
+        help="Retry missing or failed Veo clips this many times before stitching. Default: 1.",
+    )
     run.add_argument("--veo-poll-interval", type=int, default=10)
     run.add_argument("--veo-max-polls", type=int, default=60)
     run.add_argument("--aspect-ratio", default="16:9", choices=("16:9", "9:16"))
@@ -151,6 +159,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     veo.add_argument("--model", default=DEFAULT_VEO_MODEL, help=f"Veo model id. Default: {DEFAULT_VEO_MODEL}.")
     veo.add_argument("--limit", type=int, default=None, help="Generate only the first N runnable clips.")
+    veo.add_argument(
+        "--failed-only",
+        action="store_true",
+        help="Only rerun jobs currently marked failed in veo_manifest.json.",
+    )
+    veo.add_argument(
+        "--job-id",
+        action="append",
+        default=None,
+        help="Only run a specific Veo job id, for example veo_0006. Can be passed multiple times.",
+    )
     veo.add_argument("--poll-interval", type=int, default=10, help="Seconds between Veo operation polls.")
     veo.add_argument("--max-polls", type=int, default=60, help="Maximum polls per clip before failing it.")
     veo.add_argument("--aspect-ratio", default="16:9", choices=("16:9", "9:16"))
@@ -287,6 +306,44 @@ def main() -> None:
                 f"{clip_result['skipped_clip_count']} skipped, "
                 f"{clip_result['failed_clip_count']} failed"
             )
+
+            missing_job_ids = _incomplete_veo_job_ids(artifacts["veo_manifest"], output_dir)
+            if missing_job_ids and args.veo_limit is not None:
+                raise SystemExit(
+                    "Skipping stitching because --veo-limit left clips incomplete: "
+                    f"{_format_job_id_sample(missing_job_ids)}"
+                )
+            for retry_index in range(max(0, args.veo_retry_missing_attempts)):
+                if not missing_job_ids:
+                    break
+                pipeline_progress.write(
+                    "Retrying missing or failed Veo clips before stitching "
+                    f"(attempt {retry_index + 1}/{args.veo_retry_missing_attempts}): "
+                    f"{_format_job_id_sample(missing_job_ids)}"
+                )
+                retry_options = replace(
+                    veo_options,
+                    limit=None,
+                    failed_only=False,
+                    job_ids=tuple(missing_job_ids),
+                )
+                retry_progress = pipeline_progress.child(len(clip_jobs), "Veo retry")
+                retry_result = generate_veo_clips_from_manifest(
+                    veo_manifest=artifacts["veo_manifest"],
+                    media_root=output_dir,
+                    options=retry_options,
+                    persist_manifest=lambda payload: write_json(output_dir / "veo_manifest.json", payload),
+                    progress=_progress_callback(retry_progress),
+                )
+                retry_progress.close()
+                write_json(output_dir / "veo_generation_retry_result.json", retry_result)
+                missing_job_ids = _incomplete_veo_job_ids(artifacts["veo_manifest"], output_dir)
+
+            if missing_job_ids:
+                raise SystemExit(
+                    "Skipping stitching because Veo clips are still incomplete after retry: "
+                    f"{_format_job_id_sample(missing_job_ids)}"
+                )
         pipeline_progress.update("Clip generation")
 
         pipeline_progress.write("Stitching episode and chapter videos")
@@ -446,6 +503,8 @@ def main() -> None:
             skip_existing=not args.overwrite_existing,
             continuity_enabled=not args.no_continuity,
             continuity_scope=args.continuity_scope,
+            failed_only=args.failed_only,
+            job_ids=tuple(args.job_id) if args.job_id else None,
         )
 
         clip_jobs = veo_manifest.get("jobs", [])
@@ -483,6 +542,36 @@ def _progress_callback(progress: ProgressTracker):
             progress.write(message)
 
     return callback
+
+
+def _incomplete_veo_job_ids(veo_manifest: dict[str, Any], media_root: Path) -> list[str]:
+    incomplete: list[str] = []
+    jobs = veo_manifest.get("jobs", [])
+    if not isinstance(jobs, list):
+        return incomplete
+    for index, job in enumerate(jobs, start=1):
+        if not isinstance(job, dict):
+            continue
+        job_id = str(job.get("job_id") or f"job {index}")
+        output_path = _resolve_veo_output_path(media_root, job)
+        if str(job.get("status", "pending")) == "failed" or not output_path.exists():
+            incomplete.append(job_id)
+    return incomplete
+
+
+def _resolve_veo_output_path(media_root: Path, job: dict[str, Any]) -> Path:
+    output_path = Path(str(job.get("output_path") or f"clips/{job.get('job_id', 'clip')}.mp4"))
+    if output_path.is_absolute():
+        return output_path
+    return media_root / output_path
+
+
+def _format_job_id_sample(job_ids: list[str], limit: int = 10) -> str:
+    sample = ", ".join(job_ids[:limit])
+    if len(job_ids) > limit:
+        return f"{sample}, ... ({len(job_ids)} total)"
+    return sample
+
 
 def load_env_file(path: Path, override: bool = False) -> dict[str, str]:
     if not path.exists():

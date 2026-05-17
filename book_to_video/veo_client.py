@@ -29,6 +29,8 @@ class VeoGenerationOptions:
     continuity_enabled: bool = True
     continuity_scope: str = "episode"
     ffmpeg_path: str | None = None
+    failed_only: bool = False
+    job_ids: tuple[str, ...] | None = None
 
 
 def generate_veo_clips_from_manifest(
@@ -73,6 +75,18 @@ def generate_veo_clips_from_manifest(
 
         start_frame_path = previous_last_frame if options.continuity_enabled else None
         _record_start_frame(job, start_frame_path)
+
+        should_run, selection_reason = _should_run_selected_job(job, options)
+        if not should_run:
+            skipped_count += 1
+            if progress:
+                progress(f"skipped {job_label}: {selection_reason}", job_index, total_jobs)
+            if output_path.exists() and str(job.get("status", "pending")) == "completed":
+                previous_last_frame = _ensure_last_frame(job, output_path, media_root, options)
+            result_jobs.append(_job_result(job, output_path, "skipped", selection_reason))
+            if persist_manifest:
+                persist_manifest(veo_manifest)
+            continue
 
         should_skip, skip_reason = _should_skip_job(job, output_path, options)
         if should_skip:
@@ -265,6 +279,8 @@ def _should_skip_job(job: dict[str, Any], output_path: Path, options: VeoGenerat
     status = str(job.get("status", "pending"))
     if status == "completed" and output_path.exists():
         return True, "already completed"
+    if status == "completed" and not output_path.exists():
+        return False, ""
     if options.skip_existing and output_path.exists():
         return True, "output file already exists"
     if status == "running":
@@ -272,6 +288,15 @@ def _should_skip_job(job: dict[str, Any], output_path: Path, options: VeoGenerat
     if status not in {"pending", "failed"}:
         return True, f"status is {status}"
     return False, ""
+
+
+def _should_run_selected_job(job: dict[str, Any], options: VeoGenerationOptions) -> tuple[bool, str]:
+    job_id = str(job.get("job_id") or "")
+    if options.job_ids is not None and job_id not in options.job_ids:
+        return False, "not selected"
+    if options.failed_only and str(job.get("status", "pending")) != "failed":
+        return False, "status is not failed"
+    return True, ""
 
 
 def _resolve_output_path(media_root: Path, job: dict[str, Any]) -> Path:
