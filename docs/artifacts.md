@@ -137,6 +137,12 @@ The command writes generated clips to each job's `output_path`, updates `status`
 
 Continuity is enabled by default. After a clip is generated, the worker extracts its last frame with `ffmpeg`, saves it under `continuity/`, and sends it as the starting image for the next clip in the same episode. Use `--no-continuity` to disable this. Use `--continuity-scope chapter` only when the entire chapter should behave like one continuous visual scene.
 
+Use `--episode-parallelism N` to generate up to `N` episodes at the same time.
+The worker still processes clips sequentially within each episode so
+previous-clip continuity remains valid. Parallel generation is intentionally
+disabled for `--continuity-scope chapter` and for `--limit`, because those modes
+depend on global ordering.
+
 The MVP assumes Veo-native audio. Each job repeats the shared voice profile so a batch of 200-300 clips keeps the same Indian classroom teacher tone as consistently as possible.
 
 ## `stitch_manifest.json`
