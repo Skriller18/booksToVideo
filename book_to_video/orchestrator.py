@@ -46,7 +46,7 @@ def build_orchestrated_episode_clips(
     episode: Episode,
     clip_count: int,
     orchestrator: str = "local",
-    orchestrator_model: str = "gemini-2.5-flash",
+    orchestrator_model: str = "gemini-3.1-pro-preview",
 ) -> list[OrchestratedClip]:
     """Create LLM-orchestrator style beats with a deterministic local fallback.
 
@@ -55,6 +55,9 @@ def build_orchestrated_episode_clips(
     A live LLM can replace this function later without changing downstream
     manifests because the contract is already explicit at the clip-beat level.
     """
+
+    if episode.metadata.get("content_mode") == "social":
+        return _build_social_episode_clips(episode, clip_count)
 
     if orchestrator in {"auto", "gemini"} and _has_google_api_key():
         try:
@@ -110,6 +113,94 @@ def build_orchestrated_episode_clips(
         )
 
     return clips
+
+
+def _build_social_episode_clips(episode: Episode, clip_count: int) -> list[OrchestratedClip]:
+    raw_clips = episode.metadata.get("social_clips", [])
+    if not isinstance(raw_clips, list):
+        raw_clips = []
+    raw_clips = raw_clips[:clip_count]
+    if len(raw_clips) < clip_count:
+        raw_clips = [
+            *raw_clips,
+            *_fallback_social_clip_specs(episode, clip_count - len(raw_clips)),
+        ]
+
+    illustrations_by_id = {
+        item.illustration_id: item
+        for item in episode.illustrations
+        if _illustration_candidate_score(item, episode, [episode.learning_goal]) >= 0
+    }
+    clips: list[OrchestratedClip] = []
+    for index, raw_clip in enumerate(raw_clips, start=1):
+        if not isinstance(raw_clip, dict):
+            raw_clip = {}
+        retention_role = str(raw_clip.get("retention_role") or f"beat_{index}").strip()
+        narration = _strip_numbered_prefix(str(raw_clip.get("narration") or "").strip())
+        visual_beat = str(raw_clip.get("visual_beat") or "").strip()
+        if not narration:
+            narration = _fallback_social_narration(episode, retention_role, index)
+        if not visual_beat:
+            visual_beat = _fallback_social_visual(episode, retention_role)
+
+        illustration_ids = raw_clip.get("illustration_ids") or []
+        if not isinstance(illustration_ids, list):
+            illustration_ids = []
+        references = [
+            illustrations_by_id[item]
+            for item in illustration_ids
+            if isinstance(item, str) and item in illustrations_by_id
+        ][:1]
+        clips.append(
+            OrchestratedClip(
+                arc_key=retention_role,
+                visual_beat=visual_beat,
+                narration=narration,
+                reference_illustrations=references,
+                transition=str(raw_clip.get("transition") or ("opening" if index == 1 else "match_cut")),
+                metadata={
+                    "orchestrator": "social_planner",
+                    "content_mode": "social",
+                    "short_rank": episode.metadata.get("short_rank"),
+                    "viral_hook": episode.metadata.get("viral_hook"),
+                    "core_insight": episode.metadata.get("core_insight"),
+                    "retention_role": retention_role,
+                    "share_reason": episode.metadata.get("share_reason"),
+                    "accuracy_guardrail": episode.metadata.get("accuracy_guardrail"),
+                    "illustration_policy": "meaningful_only" if references else "no_reference_image",
+                    "story_position": index,
+                },
+            )
+        )
+    return clips
+
+
+def _fallback_social_clip_specs(episode: Episode, count: int) -> list[dict[str, str]]:
+    roles = ("hook", "setup", "insight", "example", "payoff")
+    return [
+        {
+            "retention_role": roles[index % len(roles)],
+            "narration": _fallback_social_narration(episode, roles[index % len(roles)], index + 1),
+            "visual_beat": _fallback_social_visual(episode, roles[index % len(roles)]),
+            "transition": "match_cut",
+        }
+        for index in range(count)
+    ]
+
+
+def _fallback_social_narration(episode: Episode, retention_role: str, index: int) -> str:
+    if retention_role == "hook" or index == 1:
+        return str(episode.metadata.get("viral_hook") or f"This book idea about {episode.title} is worth a second look.")
+    if retention_role == "payoff":
+        return f"The takeaway is simple: {episode.learning_goal}"
+    return f"The book-grounded insight is this: {episode.learning_goal}"
+
+
+def _fallback_social_visual(episode: Episode, retention_role: str) -> str:
+    return (
+        f"Vertical social-video {retention_role} beat for {episode.title}: bold simple motion, "
+        "one clear metaphor, high-retention pacing, no readable text."
+    )
 
 
 def _build_llm_episode_clips(

@@ -37,6 +37,7 @@ class Episode:
     source_topic_ids: list[str]
     illustrations: list[IllustrationRef]
     micro_drama_arc: list[str]
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

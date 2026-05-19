@@ -4,7 +4,7 @@ from typing import Any
 
 from .models import ClipBeat, Episode
 from .orchestrator import build_orchestrated_episode_clips
-from .prompts import NEGATIVE_PROMPT, VOICE_PROFILE, build_audio_direction, build_veo_prompt
+from .prompts import NEGATIVE_PROMPT, SOCIAL_VOICE_PROFILE, VOICE_PROFILE, build_audio_direction, build_veo_prompt
 
 
 def build_clip_beats(
@@ -12,7 +12,7 @@ def build_clip_beats(
     episodes: list[Episode],
     clip_duration_seconds: int,
     orchestrator: str = "local",
-    orchestrator_model: str = "gemini-2.5-flash",
+    orchestrator_model: str = "gemini-3.1-pro-preview",
 ) -> list[ClipBeat]:
     clips: list[ClipBeat] = []
     global_index = 1
@@ -26,6 +26,8 @@ def build_clip_beats(
             orchestrator_model=orchestrator_model,
         )
         for episode_clip_index, orchestrated_clip in enumerate(orchestrated_clips, start=1):
+            content_mode = str(orchestrated_clip.metadata.get("content_mode") or "educational")
+            voice_profile = SOCIAL_VOICE_PROFILE if content_mode == "social" else VOICE_PROFILE
             clip = ClipBeat(
                 chapter_id=chapter["chapter_id"],
                 episode_id=episode.episode_id,
@@ -35,8 +37,8 @@ def build_clip_beats(
                 source_pages=episode.source_pages,
                 reference_illustrations=orchestrated_clip.reference_illustrations,
                 narration=orchestrated_clip.narration,
-                voice_profile=VOICE_PROFILE,
-                audio_direction=build_audio_direction(orchestrated_clip.narration),
+                voice_profile=voice_profile,
+                audio_direction=build_audio_direction(orchestrated_clip.narration, content_mode=content_mode),
                 visual_beat=orchestrated_clip.visual_beat,
                 veo_prompt="",
                 negative_prompt=NEGATIVE_PROMPT,

@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from .models import ClipBeat, Episode, IllustrationRef, StitchEpisode, to_dict
+from .models import ClipBeat, Episode, StitchEpisode, to_dict
 from .planner import build_episode_plan
 from .prompts import build_veo_prompt
 from .storyboard import build_clip_beats
+
+DEFAULT_SOCIAL_SHORT_COUNT = 10
 
 
 def build_planning_artifacts(
@@ -15,12 +17,18 @@ def build_planning_artifacts(
     clip_duration_seconds: int,
     orchestrator: str = "local",
     orchestrator_model: str = "gemini-2.5-flash",
+    content_mode: str = "educational",
+    short_count: int = DEFAULT_SOCIAL_SHORT_COUNT,
 ) -> dict[str, Any]:
     episodes = build_episode_plan(
         chapter=chapter,
         target_episode_count=target_episode_count,
         clips_per_episode=clips_per_episode,
         clip_duration_seconds=clip_duration_seconds,
+        content_mode=content_mode,
+        short_count=short_count,
+        orchestrator=orchestrator,
+        orchestrator_model=orchestrator_model,
     )
     clips = build_clip_beats(
         chapter=chapter,
@@ -30,18 +38,20 @@ def build_planning_artifacts(
         orchestrator_model=orchestrator_model,
     )
     veo_manifest = build_veo_manifest(clips)
-    stitch_manifest = build_stitch_manifest(episodes, clips)
+    stitch_manifest = build_stitch_manifest(episodes, clips, content_mode=content_mode)
 
     return {
         "episode_plan": {
             "chapter_id": chapter["chapter_id"],
             "chapter_title": chapter["title"],
+            "content_mode": content_mode,
             "episode_count": len(episodes),
             "episodes": to_dict(episodes),
         },
         "storyboard": {
             "chapter_id": chapter["chapter_id"],
             "chapter_title": chapter["title"],
+            "content_mode": content_mode,
             "clip_count": len(clips),
             "clips": to_dict(clips),
         },
@@ -77,7 +87,11 @@ def build_veo_manifest(clips: list[ClipBeat]) -> dict[str, Any]:
     return {"clip_job_count": len(jobs), "jobs": jobs}
 
 
-def build_stitch_manifest(episodes: list[Episode], clips: list[ClipBeat]) -> dict[str, Any]:
+def build_stitch_manifest(
+    episodes: list[Episode],
+    clips: list[ClipBeat],
+    content_mode: str = "educational",
+) -> dict[str, Any]:
     stitch_episodes: list[StitchEpisode] = []
     for episode in episodes:
         episode_clips = [clip for clip in clips if clip.episode_id == episode.episode_id]
@@ -92,11 +106,16 @@ def build_stitch_manifest(episodes: list[Episode], clips: list[ClipBeat]) -> dic
             )
         )
 
-    return {
+    manifest = {
+        "content_mode": content_mode,
         "episode_count": len(stitch_episodes),
         "episodes": to_dict(stitch_episodes),
-        "chapter_playlist": {
+    }
+    if content_mode == "social":
+        manifest["chapter_playlist"] = {}
+    else:
+        manifest["chapter_playlist"] = {
             "output_video": "chapter/full_chapter.mp4",
             "episode_paths": [episode.output_video for episode in stitch_episodes],
-        },
-    }
+        }
+    return manifest

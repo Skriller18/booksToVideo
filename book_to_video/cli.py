@@ -50,7 +50,9 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--max-polls", type=int, default=300)
     run.add_argument("--skip-cache", action="store_true")
     run.add_argument("--episode-count", type=int, default=None)
-    run.add_argument("--clips-per-episode", type=int, default=15)
+    run.add_argument("--content-mode", default="educational", choices=("educational", "social"))
+    run.add_argument("--short-count", type=int, default=10, help="Number of standalone Shorts in social mode.")
+    run.add_argument("--clips-per-episode", type=int, default=None)
     run.add_argument("--clip-duration", type=int, default=8, choices=(4, 6, 8))
     run.add_argument(
         "--orchestrator",
@@ -95,11 +97,13 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Optional target number of topic episodes. Defaults to one episode per detected topic.",
     )
+    plan.add_argument("--content-mode", default="educational", choices=("educational", "social"))
+    plan.add_argument("--short-count", type=int, default=10, help="Number of standalone Shorts in social mode.")
     plan.add_argument(
         "--clips-per-episode",
         type=int,
-        default=15,
-        help="Number of 8-second clips per 2-minute episode. Default: 15.",
+        default=None,
+        help="Number of clips per episode/Short. Defaults to 15 educational clips or 5 social clips.",
     )
     plan.add_argument(
         "--clip-duration",
@@ -299,13 +303,16 @@ def main() -> None:
         pipeline_progress.update("Chapter normalization")
 
         pipeline_progress.write("Building episode plan, storyboard, Veo manifest, and stitch manifest")
+        clips_per_episode = _resolve_clips_per_episode(args.content_mode, args.clips_per_episode)
         artifacts = build_planning_artifacts(
             chapter,
             target_episode_count=args.episode_count,
-            clips_per_episode=args.clips_per_episode,
+            clips_per_episode=clips_per_episode,
             clip_duration_seconds=args.clip_duration,
             orchestrator=args.orchestrator,
             orchestrator_model=args.orchestrator_model,
+            content_mode=args.content_mode,
+            short_count=args.short_count,
         )
         write_json(output_dir / "episode_plan.json", artifacts["episode_plan"])
         write_json(output_dir / "storyboard.json", artifacts["storyboard"])
@@ -409,7 +416,7 @@ def main() -> None:
             stitch_manifest=stitch_manifest,
             media_root=output_dir,
             output_root=output_dir,
-            include_chapter=not args.episodes_only,
+            include_chapter=not args.episodes_only and args.content_mode != "social",
             copy_codecs=args.copy_codecs,
         )
         write_json(output_dir / "stitch_result.json", stitch_result)
@@ -424,13 +431,16 @@ def main() -> None:
         chapter = read_json(chapter_path)
         progress.update("Read chapter")
         progress.write("Building planning artifacts")
+        clips_per_episode = _resolve_clips_per_episode(args.content_mode, args.clips_per_episode)
         artifacts = build_planning_artifacts(
             chapter,
             target_episode_count=args.episode_count,
-            clips_per_episode=args.clips_per_episode,
+            clips_per_episode=clips_per_episode,
             clip_duration_seconds=args.clip_duration,
             orchestrator=args.orchestrator,
             orchestrator_model=args.orchestrator_model,
+            content_mode=args.content_mode,
+            short_count=args.short_count,
         )
 
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -692,6 +702,14 @@ def _veo_operation_targets(
 
 def _safe_filename(value: str) -> str:
     return "".join(character if character.isalnum() or character in {"-", "_"} else "_" for character in value)
+
+
+def _resolve_clips_per_episode(content_mode: str, requested: int | None) -> int:
+    if requested is not None:
+        return requested
+    if content_mode == "social":
+        return 5
+    return 15
 
 
 def load_env_file(path: Path, override: bool = False) -> dict[str, str]:
