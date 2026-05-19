@@ -124,6 +124,70 @@ class PipelineTest(unittest.TestCase):
             15,
         )
 
+    def test_social_mode_builds_top_ten_standalone_shorts(self) -> None:
+        chapter = _load_sample()
+        artifacts = build_planning_artifacts(
+            chapter,
+            target_episode_count=None,
+            clips_per_episode=5,
+            clip_duration_seconds=8,
+            content_mode="social",
+            short_count=10,
+        )
+
+        self.assertEqual(artifacts["episode_plan"]["content_mode"], "social")
+        self.assertEqual(artifacts["episode_plan"]["episode_count"], 10)
+        self.assertEqual(artifacts["storyboard"]["clip_count"], 50)
+        self.assertEqual(artifacts["veo_manifest"]["clip_job_count"], 50)
+        self.assertEqual(artifacts["stitch_manifest"]["episode_count"], 10)
+        self.assertEqual(artifacts["stitch_manifest"]["chapter_playlist"], {})
+
+        first_episode = artifacts["episode_plan"]["episodes"][0]
+        self.assertEqual(first_episode["episode_id"], "short_01")
+        self.assertEqual(first_episode["duration_seconds"], 40)
+        self.assertEqual(len(artifacts["stitch_manifest"]["episodes"][0]["clip_paths"]), 5)
+
+        first_clip = artifacts["storyboard"]["clips"][0]
+        self.assertEqual(first_clip["metadata"]["content_mode"], "social")
+        self.assertEqual(first_clip["metadata"]["retention_role"], "hook")
+        self.assertEqual(first_clip["metadata"]["short_rank"], 1)
+        self.assertIn("viral_hook", first_clip["metadata"])
+
+        first_job = artifacts["veo_manifest"]["jobs"][0]
+        self.assertIn("Vertical 9:16 social media short", first_job["prompt"])
+        self.assertIn("Indian English social video narrator", first_job["audio"]["voice_profile"])
+        self.assertEqual(first_job["audio"]["mode"], "native")
+
+    def test_social_auto_falls_back_without_gemini_key(self) -> None:
+        chapter = _load_sample()
+        with mock.patch("book_to_video.planner._google_api_key", return_value=""):
+            artifacts = build_planning_artifacts(
+                chapter,
+                target_episode_count=None,
+                clips_per_episode=5,
+                clip_duration_seconds=8,
+                orchestrator="auto",
+                content_mode="social",
+                short_count=2,
+            )
+
+        self.assertEqual(artifacts["episode_plan"]["episode_count"], 2)
+        self.assertEqual(artifacts["storyboard"]["clip_count"], 10)
+
+    def test_social_gemini_requires_api_key(self) -> None:
+        chapter = _load_sample()
+        with mock.patch("book_to_video.planner._google_api_key", return_value=""):
+            with self.assertRaises(RuntimeError):
+                build_planning_artifacts(
+                    chapter,
+                    target_episode_count=None,
+                    clips_per_episode=5,
+                    clip_duration_seconds=8,
+                    orchestrator="gemini",
+                    content_mode="social",
+                    short_count=2,
+                )
+
     def test_datalab_result_normalizes_to_chapter_extraction(self) -> None:
         datalab_result = _load_json("examples/datalab_convert.sample.json")
         with tempfile.TemporaryDirectory() as tmp:
