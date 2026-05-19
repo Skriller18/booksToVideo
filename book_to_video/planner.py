@@ -218,7 +218,8 @@ def _build_social_planner_prompt(chapter: dict[str, Any], short_count: int, clip
         {
             "task": (
                 "Find the most viral standalone short-video ideas in this parsed book/chapter. "
-                "Rank the strongest book-grounded insights and script each for vertical Reels/Shorts."
+                "Rank the strongest book-grounded insights and script each for vertical Reels/Shorts "
+                "as scene action with off-screen narrator voice-over."
             ),
             "rules": [
                 "Return JSON only.",
@@ -227,6 +228,8 @@ def _build_social_planner_prompt(chapter: dict[str, Any], short_count: int, clip
                 "Use insight hooks, not fake controversy or generic summaries.",
                 "Every claim must be grounded in the provided book text.",
                 "Avoid unsupported author/person claims and avoid numbered Step narration.",
+                "Write narration as off-screen voice-over, not dialogue or a visible creator talking to camera.",
+                "Write visual beats as scenes or metaphors that continue while the narrator speaks.",
                 "Optimize for surprise, usefulness, relatability, clarity, and shareability.",
             ],
             "schema": {
@@ -243,8 +246,8 @@ def _build_social_planner_prompt(chapter: dict[str, Any], short_count: int, clip
                         "clips": [
                             {
                                 "retention_role": "hook|setup|insight|example|payoff",
-                                "narration": "spoken line",
-                                "visual_beat": "vertical video action for Veo",
+                                "narration": "off-screen narrator voice-over line",
+                                "visual_beat": "vertical scene or metaphor action for Veo",
                                 "illustration_ids": ["optional illustration ids"],
                                 "transition": "opening|match_cut|gentle_cut",
                             }

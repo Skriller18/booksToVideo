@@ -6,13 +6,14 @@ from .models import ClipBeat
 
 
 SERIES_STYLE = (
-    "continuous microdrama for school students, clean colorful Indian schoolbook animation, "
-    "warm classroom-friendly mood, simple backgrounds, clear educational framing, consistent characters"
+    "continuous narrated scene for school students, clean colorful Indian schoolbook animation, "
+    "warm classroom-friendly mood, simple backgrounds, clear educational framing, consistent silent characters"
 )
 
 SOCIAL_SERIES_STYLE = (
     "vertical social media short, bold clean visual metaphor, fast insight-led pacing, "
-    "high-retention composition, simple cinematic motion, crisp Indian educational creator style"
+    "high-retention composition, simple cinematic motion, crisp Indian educational creator style, "
+    "off-screen narrator voice-over"
 )
 
 NEGATIVE_PROMPT = (
@@ -21,7 +22,7 @@ NEGATIVE_PROMPT = (
 )
 
 VOICE_PROFILE = (
-    "same warm Indian English teacher voice across all clips, friendly desi classroom tone, "
+    "same warm Indian English off-screen narrator across all clips, friendly desi classroom tone, "
     "natural Indian accent, clear pronunciation for school students, expressive but not exaggerated"
 )
 
@@ -84,8 +85,9 @@ def build_audio_direction(spoken_line: str, content_mode: str = "educational") -
         else "Keep background ambience light and classroom-friendly, with no overpowering music or sound effects."
     )
     return (
-        f"Native audio: spoken line exactly: \"{spoken_line}\" "
+        f"Native audio: off-screen narrator voice-over says exactly: \"{spoken_line}\" "
         f"Voice profile: {voice_profile}. "
+        "No lip sync, no character dialogue, and no visible speaker performing this line. "
         f"{ambience}"
     )
 
@@ -108,10 +110,11 @@ def build_veo_prompt(clip: ClipBeat) -> str:
     return (
         f"Medium educational animated shot, {_with_period(visual_beat)} "
         f"{_with_period(reference_note)} "
-        f"Context: {narration} "
+        f"Narrator voice-over context: {narration} "
         f"Style and ambience: {SERIES_STYLE}. "
         "Camera: slow gentle push-in or pan, stable composition, one focused visual action, "
-        "natural continuity from the previous clip. "
+        "natural continuity from the previous clip. Let the scene action continue naturally under the narration; "
+        "characters may act silently but must not mouth the narration. "
         f"{audio_direction}"
     )
 
@@ -132,10 +135,11 @@ def _build_social_veo_prompt(clip: ClipBeat) -> str:
     return (
         f"Vertical 9:16 social media short, {retention_role} beat, {_with_period(visual_beat)} "
         f"{_with_period(reference_note)} "
-        f"Spoken context: {narration} "
+        f"Narrator voice-over context: {narration} "
         f"Style and ambience: {SOCIAL_SERIES_STYLE}. "
         "Camera: quick clean push-in, snappy match-cut energy, one strong visual idea, "
-        "no readable on-screen text unless explicitly requested, no fake claims, no clutter. "
+        "let the scene or metaphor play naturally under the narration, no readable on-screen text unless "
+        "explicitly requested, no fake claims, no clutter, no visible speaker lip-syncing the narration. "
         f"{audio_direction}"
     )
 

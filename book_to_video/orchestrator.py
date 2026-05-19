@@ -243,7 +243,7 @@ def _build_llm_prompt(chapter: dict[str, Any], episode: Episode, clip_count: int
     return json.dumps(
         {
             "task": (
-                "Create a continuous microdrama episode script for children. "
+                "Create a continuous narrated scene episode script for children. "
                 "Choose clips, flow, narration, and visual beats. Use textbook illustrations only when "
                 "they clarify meaning; otherwise leave illustration_ids empty so Veo is not confused."
             ),
@@ -251,8 +251,9 @@ def _build_llm_prompt(chapter: dict[str, Any], episode: Episode, clip_count: int
                 "Return JSON only.",
                 "Create exactly the requested number of clips.",
                 "Do not write Step 1, Step 2, or numbered narration.",
-                "Keep one continuous scene flow with Asha, Kabir, and a warm teacher voice.",
-                "Each narration line should teach while sounding like a microdrama moment.",
+                "Keep one continuous scene flow with Asha and Kabir acting silently while an off-screen narrator explains.",
+                "Each narration line should be voice-over, not character dialogue or teacher dialogue.",
+                "Visual beats should show scene action; do not stage a visible speaker delivering the narration.",
                 "Use illustration_ids only for clips where the illustration is meaningful.",
             ],
             "schema": {
@@ -260,7 +261,7 @@ def _build_llm_prompt(chapter: dict[str, Any], episode: Episode, clip_count: int
                     {
                         "arc_key": "short_snake_case",
                         "visual_beat": "video action for Veo",
-                        "narration": "spoken line",
+                        "narration": "off-screen narrator voice-over line",
                         "illustration_ids": ["optional illustration ids"],
                         "transition": "opening|match_cut|gentle_cut",
                     }
@@ -440,15 +441,14 @@ def _build_microdrama_narration(
     is_first: bool,
     is_last: bool,
 ) -> str:
-    asha, kabir = CHARACTERS
     if is_first:
-        return f"{asha} notices something odd and asks, what is really happening in {episode.title}?"
+        return f"The scene opens on a small clue that makes {episode.title} feel worth looking at closely."
     if arc_key == "curious_question":
-        return f"{kabir} thinks it is simple, but the clue is this: {fact}."
+        return f"At first the moment looks simple, but the important clue is this: {fact}."
     if arc_key == "scene_reveal":
-        return f"The teacher slows the moment down so the class can see the big idea: {fact}."
+        return f"As the action slows down, the big idea becomes clear: {fact}."
     if arc_key == "guided_observation":
-        return f"{asha} spots the first clue, and the class connects it to what they already know."
+        return "The first clue stands out, and the scene connects it to what students already know."
     if arc_key == "concept_turn":
         return f"That clue changes the whole scene, because {next_fact}."
     if arc_key == "meaningful_illustration":
@@ -456,11 +456,11 @@ def _build_microdrama_narration(
     if arc_key == "cause_and_effect":
         return f"When the class changes one thing, the result shows the relationship clearly."
     if arc_key == "misread":
-        return f"For a moment, {asha} guesses the wrong reason, which is exactly where many students get confused."
+        return "For a moment, the scene points to the wrong reason, which is exactly where many students get confused."
     if arc_key == "correction":
         return f"The scene changes the guess into the right idea: {fact}."
     if arc_key == "practice_moment":
-        return f"{kabir} tries the same idea in a familiar example, and it still works: {next_fact}."
+        return f"The same idea appears in a familiar example, and it still works: {next_fact}."
     if arc_key == "emotional_payoff":
         return f"That is when the lesson clicks; the small moment explains the bigger concept."
     if arc_key == "recap" or is_last:
@@ -500,6 +500,6 @@ def _build_microdrama_visual(
             "the next connected idea."
         )
     return (
-        f"{arc_description} Continue the same classroom microdrama and show {episode.title} "
+        f"{arc_description} Continue the same narrated classroom scene and show {episode.title} "
         f"through simple student-friendly motion: {fact}."
     )

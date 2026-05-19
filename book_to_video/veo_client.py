@@ -359,7 +359,8 @@ def _sanitize_job_for_veo(job: dict[str, Any]) -> None:
         if "spoken_line" in audio:
             audio["spoken_line"] = sanitize_veo_text(str(audio["spoken_line"]))
         if audio.get("spoken_line"):
-            audio["audio_direction"] = build_audio_direction(str(audio["spoken_line"]))
+            content_mode = "social" if "social" in str(audio.get("voice_profile", "")).lower() else "educational"
+            audio["audio_direction"] = build_audio_direction(str(audio["spoken_line"]), content_mode=content_mode)
         elif "audio_direction" in audio:
             audio["audio_direction"] = sanitize_veo_text(str(audio["audio_direction"]))
 
