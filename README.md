@@ -126,6 +126,20 @@ python3 -m book_to_video.cli plan \
   --episode-count 20
 ```
 
+Plan social-first viral Shorts instead of educational episodes:
+
+```bash
+python3 -m book_to_video.cli plan \
+  --chapter-json examples/chapter_extraction.sample.json \
+  --output-dir runs/sample_social \
+  --content-mode social
+```
+
+Social mode uses the same parsed book input and LLM integration, but changes the
+planner instructions to rank the top 10 shareable book-grounded insights. Each
+Short is scripted as five 8-second vertical clips by default and stitched as its
+own standalone video, without a full chapter compilation.
+
 Check the stitching plan before clips exist:
 
 ```bash
