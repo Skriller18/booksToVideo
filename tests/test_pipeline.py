@@ -32,8 +32,10 @@ class PipelineTest(unittest.TestCase):
         self.assertEqual(artifacts["stitch_manifest"]["episode_count"], 3)
         first_job = artifacts["veo_manifest"]["jobs"][0]
         self.assertEqual(first_job["audio"]["mode"], "native")
-        self.assertIn("Indian English teacher voice", first_job["audio"]["voice_profile"])
-        self.assertIn("Native audio", first_job["prompt"])
+        self.assertIn("Indian English off-screen narrator", first_job["audio"]["voice_profile"])
+        self.assertIn("off-screen narrator voice-over", first_job["prompt"])
+        self.assertIn("must not mouth the narration", first_job["prompt"])
+        self.assertIn("No lip sync", first_job["audio"]["audio_direction"])
         self.assertNotIn("Step 1", first_job["audio"]["spoken_line"])
 
     def test_orchestrator_keeps_flow_continuous_and_uses_few_references(self) -> None:
@@ -56,6 +58,7 @@ class PipelineTest(unittest.TestCase):
         self.assertEqual(clips[0]["metadata"]["orchestrator"], "deterministic_microdrama")
         self.assertEqual(clips[0]["metadata"]["illustration_policy"], "no_reference_image")
         self.assertIn("do not introduce textbook reference images", jobs[0]["prompt"])
+        self.assertIn("Let the scene action continue naturally under the narration", jobs[0]["prompt"])
 
     def test_orchestrator_rejects_single_unrelated_logo_asset(self) -> None:
         chapter = {
@@ -105,6 +108,19 @@ class PipelineTest(unittest.TestCase):
         self.assertNotIn("Ruskin Bond", audio_direction)
         self.assertNotIn("Speaker icon", sanitized)
         self.assertIn("The author is one of", sanitized)
+        self.assertIn("off-screen narrator voice-over says exactly", audio_direction)
+        self.assertIn("no character dialogue", audio_direction)
+
+    def test_social_audio_direction_keeps_social_narrator_voice_over(self) -> None:
+        audio_direction = build_audio_direction(
+            "The book gives us one clear clue.",
+            content_mode="social",
+        )
+
+        self.assertIn("off-screen narrator voice-over says exactly", audio_direction)
+        self.assertIn("Indian English social video narrator", audio_direction)
+        self.assertIn("No lip sync", audio_direction)
+        self.assertIn("no visible speaker", audio_direction)
 
     def test_target_episode_count_expands_to_300_clips(self) -> None:
         chapter = _load_sample()
@@ -155,7 +171,10 @@ class PipelineTest(unittest.TestCase):
 
         first_job = artifacts["veo_manifest"]["jobs"][0]
         self.assertIn("Vertical 9:16 social media short", first_job["prompt"])
+        self.assertIn("Narrator voice-over context", first_job["prompt"])
+        self.assertIn("no visible speaker lip-syncing", first_job["prompt"])
         self.assertIn("Indian English social video narrator", first_job["audio"]["voice_profile"])
+        self.assertIn("off-screen narrator voice-over", first_job["audio"]["audio_direction"])
         self.assertEqual(first_job["audio"]["mode"], "native")
 
     def test_social_auto_falls_back_without_gemini_key(self) -> None:
@@ -350,6 +369,7 @@ class PipelineTest(unittest.TestCase):
                     "prompt": "Context: Ruskin Bond is one of India's most loved writers.",
                     "audio": {
                         "spoken_line": "Step 1: Ruskin Bond is one of India's most loved writers.",
+                        "voice_profile": "clear Indian English social video narrator",
                     },
                     "output_path": "clips/clip_0001.mp4",
                     "status": "pending",
@@ -370,6 +390,7 @@ class PipelineTest(unittest.TestCase):
             self.assertNotIn("Ruskin Bond", fake_client.submitted_prompts[0])
             self.assertNotIn("Ruskin Bond", manifest["jobs"][0]["prompt"])
             self.assertNotIn("Ruskin Bond", manifest["jobs"][0]["audio"]["spoken_line"])
+            self.assertIn("Indian English social video narrator", manifest["jobs"][0]["audio"]["audio_direction"])
 
     def test_veo_generation_skips_existing_completed_clip(self) -> None:
         manifest = {
