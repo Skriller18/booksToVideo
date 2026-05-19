@@ -92,11 +92,11 @@ Important fields:
 - `metadata.orchestrator`
 - `metadata.illustration_policy`
 
-This file should be editable by a curriculum/content reviewer before generation. `narration` is the intended native Veo spoken line, not a separate TTS script.
+This file should be editable by a curriculum/content reviewer before generation. `narration` is the intended native Veo off-screen narrator voice-over line, not a separate TTS script.
 
 The storyboard is produced through an orchestrator contract that decides the
-microdrama flow, what the teacher voice says, and whether an illustration should
-be used. Clips that do not need a source illustration keep
+narrated scene flow, what the narrator says over the scene, and whether an
+illustration should be used. Clips that do not need a source illustration keep
 `reference_illustrations` empty so Veo is guided by continuity and the prompt
 instead of unrelated page images.
 

@@ -113,7 +113,7 @@ python3 -m book_to_video.cli plan \
 
 Planning uses `--orchestrator auto` by default. With `VERTEX_API_KEY`,
 `GEMINI_API_KEY`, or `GOOGLE_API_KEY` available, it asks Gemini to script the
-episode flow; otherwise it uses the deterministic local microdrama fallback.
+episode flow; otherwise it uses the deterministic local narrated-scene fallback.
 Use `--orchestrator local` for repeatable offline planning, or
 `--orchestrator gemini` to require the LLM path.
 
@@ -244,12 +244,12 @@ Implemented:
 
 - JSON schemas as dataclasses
 - rule-based episode segmentation
-- LLM-orchestrator compatible microdrama scripting with deterministic local fallback
+- LLM-orchestrator compatible narrated-scene scripting with deterministic local fallback
 - 15-clip storyboard generation per episode without numbered step narration
 - selective textbook illustration references so Veo only receives images when they clarify the beat
 - asset filtering for publisher logos, QR/barcodes, icons, decorative images, and other non-lesson assets
 - Veo prompt manifest generation
-- native Veo audio instructions per clip
+- native Veo off-screen narrator voice-over instructions per clip
 - Gemini API Veo clip generation from `veo_manifest.json`
 - resumable Veo manifest status updates
 - previous-clip last-frame continuity for Veo generation
