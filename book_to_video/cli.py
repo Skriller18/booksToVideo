@@ -13,6 +13,7 @@ from .pipeline import build_planning_artifacts
 from .placeholders import create_placeholder_clips
 from .progress import ProgressTracker
 from .stitcher import stitch_from_manifest
+from .seedance_client import OpenRouterSeedanceClient
 from .veo_client import (
     DEFAULT_VEO_MODEL,
     VeoGenerationOptions,
@@ -36,7 +37,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     run = subparsers.add_parser(
         "run",
-        help="Run extraction, planning, Veo generation, and stitching as one pipeline.",
+        help="Run extraction, planning, video generation, and stitching as one pipeline.",
     )
     run.add_argument("--pdf", help="Path to chapter PDF. Required unless --raw-json is provided.")
     run.add_argument("--raw-json", help="Use a saved Datalab result instead of calling the API.")
@@ -61,7 +62,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="Script orchestrator for episode flow. auto uses Gemini when an API key is available.",
     )
     run.add_argument("--orchestrator-model", default="gemini-2.5-flash")
-    run.add_argument("--veo-model", default=DEFAULT_VEO_MODEL, help=f"Veo model id. Default: {DEFAULT_VEO_MODEL}.")
+    run.add_argument("--video-model", "--veo-model", dest="video_model", default=DEFAULT_VEO_MODEL, help=f"Video model id. Default: {DEFAULT_VEO_MODEL}.")
+    run.add_argument("--provider", default="veo", choices=("veo", "openrouter"), help="Video generation provider. Default: veo.")
     run.add_argument("--veo-limit", type=int, default=None, help="Generate only the first N runnable clips.")
     run.add_argument(
         "--veo-retry-missing-attempts",
@@ -180,14 +182,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     veo = subparsers.add_parser(
         "generate-veo",
-        help="Generate real Veo clips from veo_manifest.json using the Gemini API.",
+        help="Generate video clips from veo_manifest.json using the configured provider.",
     )
     veo.add_argument("--veo-manifest", required=True, help="Path to veo_manifest.json.")
     veo.add_argument(
         "--media-root",
         help="Root directory for relative clip output paths. Defaults to the manifest directory.",
     )
-    veo.add_argument("--model", default=DEFAULT_VEO_MODEL, help=f"Veo model id. Default: {DEFAULT_VEO_MODEL}.")
+    veo.add_argument("--video-model", "--model", dest="video_model", default=DEFAULT_VEO_MODEL, help=f"Video model id. Default: {DEFAULT_VEO_MODEL}.")
+    veo.add_argument("--provider", default="veo", choices=("veo", "openrouter"), help="Video generation provider. Default: veo.")
     veo.add_argument("--limit", type=int, default=None, help="Generate only the first N runnable clips.")
     veo.add_argument(
         "--failed-only",
@@ -339,9 +342,9 @@ def main() -> None:
             write_json(output_dir / "mock_clips_result.json", clip_result)
             pipeline_progress.write(f"Wrote mock clip result: {clip_result['created_clip_count']} clips")
         else:
-            pipeline_progress.write("Generating Veo clips")
+            pipeline_progress.write("Generating video clips")
             veo_options = VeoGenerationOptions(
-                model=args.veo_model,
+                model=args.video_model,
                 aspect_ratio=args.aspect_ratio,
                 resolution=args.resolution,
                 person_generation=args.person_generation,
@@ -354,13 +357,14 @@ def main() -> None:
                 episode_parallelism=args.episode_parallelism,
             )
             clip_jobs = artifacts["veo_manifest"].get("jobs", [])
-            clip_progress = pipeline_progress.child(len(clip_jobs), "Veo clips")
+            clip_progress = pipeline_progress.child(len(clip_jobs), "Video clips")
             clip_result = generate_veo_clips_from_manifest(
                 veo_manifest=artifacts["veo_manifest"],
                 media_root=output_dir,
                 options=veo_options,
                 persist_manifest=lambda payload: write_json(output_dir / "veo_manifest.json", payload),
                 progress=_progress_callback(clip_progress),
+                client=_build_video_client(args.provider),
             )
             clip_progress.close()
             write_json(output_dir / "veo_generation_result.json", clip_result)
@@ -398,6 +402,7 @@ def main() -> None:
                     options=retry_options,
                     persist_manifest=lambda payload: write_json(output_dir / "veo_manifest.json", payload),
                     progress=_progress_callback(retry_progress),
+                    client=_build_video_client(args.provider),
                 )
                 retry_progress.close()
                 write_json(output_dir / "veo_generation_retry_result.json", retry_result)
@@ -556,13 +561,13 @@ def main() -> None:
         progress.close()
     elif args.command == "generate-veo":
         manifest_path = Path(args.veo_manifest)
-        progress = ProgressTracker(total=2, description="Generate Veo")
+        progress = ProgressTracker(total=2, description="Generate video")
         progress.write(f"Reading Veo manifest: {manifest_path}")
         veo_manifest = read_json(manifest_path)
         progress.update("Read Veo manifest")
         media_root = Path(args.media_root) if args.media_root else manifest_path.parent
         options = VeoGenerationOptions(
-            model=args.model,
+            model=args.video_model,
             aspect_ratio=args.aspect_ratio,
             resolution=args.resolution,
             person_generation=args.person_generation,
@@ -578,13 +583,14 @@ def main() -> None:
         )
 
         clip_jobs = veo_manifest.get("jobs", [])
-        clip_progress = progress.child(len(clip_jobs), "Veo clips")
+        clip_progress = progress.child(len(clip_jobs), "Video clips")
         result = generate_veo_clips_from_manifest(
             veo_manifest=veo_manifest,
             media_root=media_root,
             options=options,
             persist_manifest=lambda payload: write_json(manifest_path, payload),
             progress=_progress_callback(clip_progress),
+            client=_build_video_client(args.provider),
         )
         clip_progress.close()
         write_json(media_root / "veo_generation_result.json", result)
@@ -623,6 +629,12 @@ def main() -> None:
         progress.update("Write diagnostics")
         progress.write("Wrote Veo diagnostics: " + ", ".join(str(path) for path in written_paths))
         progress.close()
+
+
+def _build_video_client(provider: str):
+    if provider == "openrouter":
+        return OpenRouterSeedanceClient()
+    return _build_google_genai_client()
 
 
 def _progress_callback(progress: ProgressTracker):
