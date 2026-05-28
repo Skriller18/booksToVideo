@@ -705,6 +705,65 @@ class PipelineTest(unittest.TestCase):
             self.assertEqual(result["generated_clip_count"], 2)
             self.assertNotIn("parallelism_mode", result)
 
+    def test_openrouter_client_submits_with_generate_audio_and_frame_images(self) -> None:
+        from book_to_video.seedance_client import OpenRouterSeedanceClient
+
+        with tempfile.TemporaryDirectory() as tmp:
+            frame_path = Path(tmp) / "frame.png"
+            frame_path.write_bytes(b"fake-png")
+            job = {
+                "job_id": "s_0001",
+                "prompt": "A mountain scene.",
+                "duration_seconds": 5,
+            }
+            options = VeoGenerationOptions(
+                model="bytedance/seedance-2.0",
+                aspect_ratio="16:9",
+                resolution="1080p",
+                poll_interval_seconds=0,
+                max_polls=1,
+            )
+
+            client = FakeOpenRouterClient()
+            operation = client.submit_video_generation(job, options, start_frame_path=frame_path)
+            self.assertEqual(operation["job_id"], "s_0001")
+            self.assertTrue(client.submitted)
+            payload = client.last_payload
+            self.assertEqual(payload["model"], "bytedance/seedance-2.0")
+            self.assertEqual(payload["generate_audio"], True)
+            self.assertEqual(payload["aspect_ratio"], "16:9")
+            self.assertEqual(payload["resolution"], "1080p")
+            self.assertEqual(payload["duration"], 5)
+            self.assertIn("frame_images", payload)
+            self.assertEqual(payload["frame_images"][0]["type"], "first_frame")
+
+    def test_openrouter_client_poll_and_save(self) -> None:
+        from book_to_video.seedance_client import OpenRouterSeedanceClient
+
+        client = FakeOpenRouterClient()
+        options = VeoGenerationOptions(poll_interval_seconds=0, max_polls=1)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            operation = {
+                "job_id": "s_0001",
+                "polling_url": "https://openrouter.ai/api/v1/videos/s_0001",
+            }
+            poll_op = client.poll_video_generation(operation, options)
+            self.assertTrue(poll_op["done"])
+            self.assertIn("url", poll_op["response"])
+
+            output_path = Path(tmp) / "video.mp4"
+            client.save_generated_video(poll_op, output_path)
+            self.assertTrue(output_path.exists())
+            self.assertEqual(output_path.read_bytes(), b"video-bytes")
+
+    def test_cli_provider_openrouter_builds_seedance_client(self) -> None:
+        from book_to_video.seedance_client import OpenRouterSeedanceClient
+        from book_to_video.cli import _build_video_client
+        with mock.patch.dict(os.environ, {"OPENROUTER_API_KEY": "test_key_123"}, clear=False):
+            client = _build_video_client("openrouter")
+        self.assertIsInstance(client, OpenRouterSeedanceClient)
+
     def test_env_file_loader_reads_keys_without_overriding_existing_env(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             env_path = Path(tmp) / ".env"
@@ -820,6 +879,50 @@ class FakeOperation:
 class FakeOperationResponse:
     def __init__(self) -> None:
         self.generated_videos = []
+
+
+class FakeOpenRouterClient:
+    """Test double that mimics OpenRouterSeedanceClient for unit tests."""
+
+    def __init__(self) -> None:
+        self.submitted = False
+        self.last_payload: dict = {}
+
+    def submit_video_generation(
+        self,
+        job: dict,
+        options: VeoGenerationOptions,
+        start_frame_path: Path | None = None,
+    ) -> dict:
+        self.submitted = True
+        payload = {
+            "model": options.model,
+            "prompt": job.get("prompt", ""),
+            "generate_audio": True,
+        }
+        if options.aspect_ratio:
+            payload["aspect_ratio"] = options.aspect_ratio
+        if options.resolution:
+            payload["resolution"] = options.resolution
+        duration = job.get("duration_seconds")
+        if duration is not None:
+            payload["duration"] = duration
+        if start_frame_path and start_frame_path.exists():
+            payload["frame_images"] = [{"type": "first_frame", "image": "data:image/png;base64,fake"}]
+        self.last_payload = payload
+        return {"job_id": job["job_id"], "polling_url": f"https://openrouter.ai/api/v1/videos/{job['job_id']}"}
+
+    def poll_video_generation(self, operation: dict, options: VeoGenerationOptions) -> dict:
+        return {
+            "job_id": operation["job_id"],
+            "polling_url": operation["polling_url"],
+            "done": True,
+            "response": {"url": "https://openrouter.ai/api/v1/videos/test/content"},
+        }
+
+    def save_generated_video(self, operation: dict, output_path: Path) -> None:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(b"video-bytes")
 
 
 if __name__ == "__main__":
