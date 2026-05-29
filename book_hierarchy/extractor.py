@@ -114,6 +114,7 @@ def _try_ai(
     api_key: str | None,
 ) -> BookHierarchy:
     chapters, confidence = extract_ai(source_pdf, doc, page_count, api_key=api_key)
+    _fill_topic_text(chapters, doc)
     return BookHierarchy(
         book_title=_infer_title(source_pdf, chapters=chapters),
         source_pdf=source_pdf,
@@ -122,6 +123,21 @@ def _try_ai(
         page_count=page_count,
         chapters=chapters,
     )
+
+
+def _fill_topic_text(chapters: list[Chapter], doc: Any) -> None:
+    for ch in chapters:
+        for topic in ch.topics:
+            if topic.text:
+                continue
+            parts = []
+            start = max(0, topic.page_start - 1)
+            end = min(topic.page_end - 1, doc.page_count - 1)
+            for i in range(start, end + 1):
+                text = doc[i].get_text().strip()
+                if text:
+                    parts.append(text)
+            topic.text = "\n\n".join(parts)
 
 
 def _infer_title(
