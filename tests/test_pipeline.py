@@ -34,7 +34,8 @@ class PipelineTest(unittest.TestCase):
         self.assertEqual(first_job["audio"]["mode"], "native")
         self.assertIn("Indian English off-screen narrator", first_job["audio"]["voice_profile"])
         self.assertIn("off-screen narrator voice-over", first_job["prompt"])
-        self.assertIn("must not mouth the narration", first_job["prompt"])
+        self.assertIn("Synchronize the scene action with the meaning of the narration", first_job["prompt"])
+        self.assertIn("must not speak", first_job["prompt"])
         self.assertIn("No lip sync", first_job["audio"]["audio_direction"])
         self.assertNotIn("Step 1", first_job["audio"]["spoken_line"])
 
@@ -55,10 +56,33 @@ class PipelineTest(unittest.TestCase):
         self.assertTrue(referenced_jobs)
         self.assertLess(len(referenced_jobs), len(jobs))
         self.assertTrue(all("Step " not in clip["narration"] for clip in clips))
+        self.assertTrue(all("teacher dialogue" not in clip["narration"].lower() for clip in clips))
         self.assertEqual(clips[0]["metadata"]["orchestrator"], "deterministic_microdrama")
         self.assertEqual(clips[0]["metadata"]["illustration_policy"], "no_reference_image")
         self.assertIn("do not introduce textbook reference images", jobs[0]["prompt"])
-        self.assertIn("Let the scene action continue naturally under the narration", jobs[0]["prompt"])
+        self.assertIn("match the visuals to the voice-over", clips[0]["visual_beat"])
+        self.assertIn("Synchronize the scene action with the meaning of the narration", jobs[0]["prompt"])
+
+    def test_educational_mode_is_narration_first_microdrama(self) -> None:
+        chapter = _load_sample()
+        artifacts = build_planning_artifacts(
+            chapter,
+            target_episode_count=1,
+            clips_per_episode=4,
+            clip_duration_seconds=8,
+        )
+
+        first_episode = artifacts["episode_plan"]["episodes"][0]
+        first_clip = artifacts["storyboard"]["clips"][0]
+        first_job = artifacts["veo_manifest"]["jobs"][0]
+
+        self.assertEqual(first_episode["metadata"]["content_mode"], "educational")
+        self.assertIn("small visual clue", first_clip["narration"])
+        self.assertIn("narration-led classroom scene", first_clip["visual_beat"])
+        self.assertIn("silent character actions", first_job["prompt"])
+        self.assertIn("no character dialogue", first_job["audio"]["audio_direction"])
+        self.assertNotIn("One learner asks", json.dumps(artifacts["storyboard"]))
+        self.assertNotIn("teacher or scene corrects", json.dumps(artifacts["storyboard"]).lower())
 
     def test_orchestrator_rejects_single_unrelated_logo_asset(self) -> None:
         chapter = {
