@@ -13,18 +13,18 @@ from .models import Episode, IllustrationRef
 CHARACTERS = ("Asha", "Kabir")
 
 MICRODRAMA_BEATS = [
-    ("cold_open", "A tiny everyday problem pulls the learners into the topic."),
-    ("curious_question", "One learner asks the question the episode will answer."),
-    ("scene_reveal", "The lesson reveals the core idea in one clear visual moment."),
-    ("guided_observation", "The learners notice the first important clue."),
-    ("concept_turn", "The story shows why that clue matters."),
+    ("cold_open", "A tiny everyday problem visually introduces the topic."),
+    ("curious_question", "The scene poses the core question through action, not dialogue."),
+    ("scene_reveal", "The narration reveals the core idea in one clear visual moment."),
+    ("guided_observation", "The scene highlights the first important clue for students."),
+    ("concept_turn", "The visual action shows why that clue matters."),
     ("meaningful_illustration", "A textbook illustration appears only if it clarifies the idea."),
     ("cause_and_effect", "A single action makes the relationship visible."),
     ("misread", "A plausible wrong idea appears briefly."),
-    ("correction", "The teacher or scene corrects the misunderstanding through action."),
-    ("practice_moment", "The learners try the idea in a familiar situation."),
-    ("emotional_payoff", "The characters feel the idea click."),
-    ("recap", "The episode restates the learning in story language."),
+    ("correction", "The scene corrects the misunderstanding through action."),
+    ("practice_moment", "The idea appears in a familiar situation."),
+    ("emotional_payoff", "The silent characters react as the idea becomes clear."),
+    ("recap", "The episode restates the learning through narrator-led visuals."),
     ("bridge", "A final moment creates curiosity for the next episode."),
 ]
 
@@ -243,17 +243,19 @@ def _build_llm_prompt(chapter: dict[str, Any], episode: Episode, clip_count: int
     return json.dumps(
         {
             "task": (
-                "Create a continuous narrated scene episode script for children. "
-                "Choose clips, flow, narration, and visual beats. Use textbook illustrations only when "
-                "they clarify meaning; otherwise leave illustration_ids empty so Veo is not confused."
+                "Create a narration-first educational micro-drama episode script for children. "
+                "Choose clips, flow, narration, and visual beats so each scene action matches the narrator's "
+                "meaning. Use textbook illustrations only when they clarify meaning; otherwise leave "
+                "illustration_ids empty so Veo is not confused."
             ),
             "rules": [
                 "Return JSON only.",
                 "Create exactly the requested number of clips.",
                 "Do not write Step 1, Step 2, or numbered narration.",
-                "Keep one continuous scene flow with Asha and Kabir acting silently while an off-screen narrator explains.",
-                "Each narration line should be voice-over, not character dialogue or teacher dialogue.",
-                "Visual beats should show scene action; do not stage a visible speaker delivering the narration.",
+                "Keep one continuous teaching scene flow with silent characters only as visual actors.",
+                "Each narration line must be off-screen explanatory voice-over, not character dialogue, teacher dialogue, or a visible presenter.",
+                "Visual beats must show the narration meaning through action, diagrams, objects, board work, experiments, or meaningful textbook illustrations.",
+                "Do not stage a visible speaker delivering the narration, lip-syncing, or gesturing like a presenter.",
                 "Use illustration_ids only for clips where the illustration is meaningful.",
             ],
             "schema": {
@@ -442,27 +444,27 @@ def _build_microdrama_narration(
     is_last: bool,
 ) -> str:
     if is_first:
-        return f"The scene opens on a small clue that makes {episode.title} feel worth looking at closely."
+        return f"We begin with a small visual clue that makes {episode.title} worth looking at closely."
     if arc_key == "curious_question":
-        return f"At first the moment looks simple, but the important clue is this: {fact}."
+        return f"At first the scene looks simple, but the important question comes from this clue: {fact}."
     if arc_key == "scene_reveal":
         return f"As the action slows down, the big idea becomes clear: {fact}."
     if arc_key == "guided_observation":
-        return "The first clue stands out, and the scene connects it to what students already know."
+        return "The first clue stands out, and the visuals connect it to what students already know."
     if arc_key == "concept_turn":
-        return f"That clue changes the whole scene, because {next_fact}."
+        return f"That clue changes how we understand the scene, because {next_fact}."
     if arc_key == "meaningful_illustration":
         return f"Now the picture from the book helps us see the idea clearly: {fact}."
     if arc_key == "cause_and_effect":
         return f"When the class changes one thing, the result shows the relationship clearly."
     if arc_key == "misread":
-        return "For a moment, the scene points to the wrong reason, which is exactly where many students get confused."
+        return "For a moment, the visuals show a likely wrong idea, which is exactly where many students get confused."
     if arc_key == "correction":
         return f"The scene changes the guess into the right idea: {fact}."
     if arc_key == "practice_moment":
         return f"The same idea appears in a familiar example, and it still works: {next_fact}."
     if arc_key == "emotional_payoff":
-        return f"That is when the lesson clicks; the small moment explains the bigger concept."
+        return f"That is when the small moment makes the bigger concept clear."
     if arc_key == "recap" or is_last:
         return f"So this episode teaches one connected idea: {episode.learning_goal}"
     if arc_key == "bridge":
@@ -481,7 +483,8 @@ def _build_microdrama_visual(
         caption = _clean_fact(illustration.caption or episode.title)
         return (
             f"{arc_description} The scene uses only the relevant textbook illustration, "
-            f"focused on: {caption}. The characters point to one meaningful detail."
+            f"focused on: {caption}. Use a pointer, highlight motion, or silent character action to draw attention "
+            "to one meaningful detail without dialogue."
         )
 
     if arc_key == "misread":
@@ -500,6 +503,6 @@ def _build_microdrama_visual(
             "the next connected idea."
         )
     return (
-        f"{arc_description} Continue the same narrated classroom scene and show {episode.title} "
-        f"through simple student-friendly motion: {fact}."
+        f"{arc_description} Continue the same narration-led classroom scene and match the visuals to the voice-over. "
+        f"Show {episode.title} through simple student-friendly motion: {fact}."
     )

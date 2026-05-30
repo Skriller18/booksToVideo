@@ -6,8 +6,8 @@ from .models import ClipBeat
 
 
 SERIES_STYLE = (
-    "continuous narrated scene for school students, clean colorful Indian schoolbook animation, "
-    "warm classroom-friendly mood, simple backgrounds, clear educational framing, consistent silent characters"
+    "narration-first educational micro-drama for school students, clean colorful Indian schoolbook animation, "
+    "warm classroom-friendly mood, simple backgrounds, clear teaching visuals, silent characters only when useful"
 )
 
 SOCIAL_SERIES_STYLE = (
@@ -113,8 +113,10 @@ def build_veo_prompt(clip: ClipBeat) -> str:
         f"Narrator voice-over context: {narration} "
         f"Style and ambience: {SERIES_STYLE}. "
         "Camera: slow gentle push-in or pan, stable composition, one focused visual action, "
-        "natural continuity from the previous clip. Let the scene action continue naturally under the narration; "
-        "characters may act silently but must not mouth the narration. "
+        "natural continuity from the previous clip. Synchronize the scene action with the meaning of the narration; "
+        "the visuals should explain what the narrator says through objects, diagrams, board work, experiments, "
+        "textbook illustrations, and silent character actions. Characters may act silently but must not speak, "
+        "gesture like presenters, or mouth the narration. "
         f"{audio_direction}"
     )
 
